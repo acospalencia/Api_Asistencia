@@ -1,0 +1,15 @@
+Options -Indexes
+RewriteEngine On
+
+# Permite responder correctamente las solicitudes OPTIONS de CORS.
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^ index.php [L]
+
+# Envía todas las rutas virtuales al controlador frontal.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
+
+<FilesMatch "^(BD_credentials\.php|\.env|composer\.(json|lock))$">
+    Require all denied
+</FilesMatch>

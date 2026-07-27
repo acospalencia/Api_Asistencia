@@ -1,0 +1,15 @@
+@ApiBaseUrl = https://tudominio.com/api-asistencia
+@Token = REEMPLAZAR_CON_ACCESS_TOKEN
+
+POST {{ApiBaseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "usuario",
+  "password": "contraseña"
+}
+
+###
+
+GET {{ApiBaseUrl}}/api/v1/account/me
+Authorization: Bearer {{Token}}
