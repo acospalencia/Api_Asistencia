@@ -13,3 +13,75 @@ Content-Type: application/json
 
 GET {{ApiBaseUrl}}/api/v1/account/me
 Authorization: Bearer {{Token}}
+
+###
+
+GET {{ApiBaseUrl}}/api/v1/locations
+Authorization: Bearer {{Token}}
+
+###
+
+POST {{ApiBaseUrl}}/api/v1/attendance/check-in
+Authorization: Bearer {{Token}}
+Content-Type: application/json
+
+{
+  "idUbicacion": 1,
+  "latitud": 13.692900,
+  "longitud": -89.218200,
+  "comentario": "Entrada desde el proyecto asignado"
+}
+
+###
+
+POST {{ApiBaseUrl}}/api/v1/attendance/check-out
+Authorization: Bearer {{Token}}
+Content-Type: application/json
+
+{
+  "idUbicacion": 1,
+  "latitud": 13.692900,
+  "longitud": -89.218200,
+  "comentario": "Salida desde el proyecto asignado"
+}
+
+###
+
+GET {{ApiBaseUrl}}/api/v1/admin/dashboard
+Authorization: Bearer {{Token}}
+
+###
+
+PUT {{ApiBaseUrl}}/api/v1/admin/users/2/role
+Authorization: Bearer {{Token}}
+Content-Type: application/json
+
+{
+  "roleId": 2
+}
+
+###
+
+PATCH {{ApiBaseUrl}}/api/v1/admin/users/2/status
+Authorization: Bearer {{Token}}
+Content-Type: application/json
+
+{
+  "active": true
+}
+
+###
+
+POST {{ApiBaseUrl}}/api/v1/admin/supervisor-assignments
+Authorization: Bearer {{Token}}
+Content-Type: application/json
+
+{
+  "supervisorId": 3,
+  "technicianIds": [4, 5, 6]
+}
+
+###
+
+DELETE {{ApiBaseUrl}}/api/v1/admin/supervisor-assignments/4
+Authorization: Bearer {{Token}}

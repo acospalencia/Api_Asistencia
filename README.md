@@ -36,6 +36,26 @@ ejecutará.
 - `POST /api/v1/auth/register`: crea los datos personales y el usuario,
   asigna un rol operativo y devuelve una sesión JWT.
 - `GET /api/v1/account/me`: requiere `Authorization: Bearer TOKEN`.
+- `GET /api/v1/locations`: devuelve las ubicaciones activas autorizadas.
+- `POST /api/v1/attendance/check-in`: registra la entrada del usuario
+  autenticado. Valida un radio máximo de 50 metros y evita entradas duplicadas
+  durante la misma jornada.
+- `POST /api/v1/attendance/check-out`: registra la salida del usuario
+  autenticado. Exige una entrada previa, valida un radio máximo de 50 metros,
+  evita salidas duplicadas y solicita justificación antes de las 6:00 p. m.
+- `GET /api/v1/admin/dashboard`: devuelve métricas, usuarios, roles,
+  supervisores, técnicos y sus asignaciones. Requiere rol Administrador.
+- `PUT /api/v1/admin/users/{id}/role`: cambia el rol de un usuario.
+- `PATCH /api/v1/admin/users/{id}/status`: activa o desactiva una cuenta.
+- `POST /api/v1/admin/supervisor-assignments`: asigna varios técnicos a un
+  supervisor. Cada técnico conserva como máximo un supervisor activo.
+- `DELETE /api/v1/admin/supervisor-assignments/{technicianId}`: retira la
+  asignación activa de un técnico.
+
+Para asegurar que existan los roles `Administrador`, `Supervisor` y `Técnico`,
+ejecuta una vez `database/admin_roles_setup.sql` desde phpMyAdmin. El mismo
+archivo contiene una instrucción comentada para promover la primera cuenta
+administrativa.
 
 Si la carpeta se llama `api-asistencia`, las URLs serán:
 
