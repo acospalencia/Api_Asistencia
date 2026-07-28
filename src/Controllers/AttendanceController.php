@@ -350,11 +350,11 @@ final class AttendanceController
             new DateTimeZone('America/El_Salvador')
         );
 
-        if ((int) $now->format('H') < 18 && $comment === '') {
+        if ($now->format('H:i:s') < '17:00:00' && $comment === '') {
             Response::error(
                 422,
                 'early_check_out_comment_required',
-                'Debe justificar la salida realizada antes de las 6:00 p. m.'
+                'Debe justificar la salida realizada antes de las 5:00 p. m.'
             );
         }
 
@@ -478,6 +478,27 @@ final class AttendanceController
                     409,
                     'check_out_already_registered',
                     'La salida de hoy ya fue registrada.'
+                );
+            }
+
+            $activeMissionStatement = $connection->prepare(
+                "SELECT id_evento
+                 FROM Eventos_Jornada
+                 WHERE id_jornada = :id_jornada
+                   AND estado_evento = 'EN_TRAYECTO'
+                 LIMIT 1
+                 FOR UPDATE"
+            );
+            $activeMissionStatement->execute([
+                'id_jornada' => $journeyId,
+            ]);
+
+            if ($activeMissionStatement->fetch() !== false) {
+                $connection->rollBack();
+                Response::error(
+                    409,
+                    'mission_in_progress',
+                    'Debe finalizar o cancelar la misión en trayecto antes de marcar su salida.'
                 );
             }
 

@@ -7,6 +7,9 @@ use Nordictech\Api\Controllers\AuthController;
 use Nordictech\Api\Controllers\AttendanceController;
 use Nordictech\Api\Controllers\AdminController;
 use Nordictech\Api\Controllers\RegisterController;
+use Nordictech\Api\Controllers\SupervisorController;
+use Nordictech\Api\Controllers\WorkdayEventController;
+use Nordictech\Api\Controllers\DeviceController;
 use Nordictech\Api\Http\AuthMiddleware;
 use Nordictech\Api\Http\Response;
 
@@ -17,7 +20,7 @@ try {
     if ($method === 'GET' && $path === '/api/v1/health') {
         Response::json([
             'status' => 'ok',
-            'apiVersion' => '2026.07.27.5',
+            'apiVersion' => '2026.07.28.4',
             'pdoMysql' => extension_loaded('pdo_mysql'),
         ]);
     }
@@ -107,6 +110,152 @@ try {
             $claims,
             (int) $matches[1]
         );
+    }
+
+    if ($method === 'POST'
+        && $path === '/api/v1/admin/locations') {
+        $claims = AuthMiddleware::authenticate();
+        (new AdminController())->createLocation($claims);
+    }
+
+    if ($method === 'PUT'
+        && preg_match(
+            '#^/api/v1/admin/locations/(\d+)$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new AdminController())->updateLocation(
+            $claims,
+            (int) $matches[1]
+        );
+    }
+
+    if ($method === 'DELETE'
+        && preg_match(
+            '#^/api/v1/admin/locations/(\d+)$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new AdminController())->deleteLocation(
+            $claims,
+            (int) $matches[1]
+        );
+    }
+
+    if ($method === 'GET'
+        && $path === '/api/v1/supervisor/dashboard') {
+        $claims = AuthMiddleware::authenticate();
+        (new SupervisorController())->dashboard($claims);
+    }
+
+    if ($method === 'GET'
+        && $path === '/api/v1/supervisor/report') {
+        $claims = AuthMiddleware::authenticate();
+        (new SupervisorController())->report($claims);
+    }
+
+    if ($method === 'GET'
+        && $path === '/api/v1/supervisor/workday-events') {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->supervisorIndex($claims);
+    }
+
+    if ($method === 'POST'
+        && $path === '/api/v1/supervisor/workday-events') {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->create($claims);
+    }
+
+    if ($method === 'PATCH'
+        && preg_match(
+            '#^/api/v1/supervisor/workday-events/(\d+)/cancel$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->cancelPending(
+            $claims,
+            (int) $matches[1]
+        );
+    }
+
+    if ($method === 'POST'
+        && preg_match(
+            '#^/api/v1/supervisor/workday-events/(\d+)/request-cancellation$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->requestCancellation(
+            $claims,
+            (int) $matches[1]
+        );
+    }
+
+    if ($method === 'GET'
+        && $path === '/api/v1/workday-events/today') {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->technicianIndex($claims);
+    }
+
+    if ($method === 'PATCH'
+        && preg_match(
+            '#^/api/v1/workday-events/(\d+)/comment$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->updateComment(
+            $claims,
+            (int) $matches[1]
+        );
+    }
+
+    if ($method === 'POST'
+        && preg_match(
+            '#^/api/v1/workday-events/(\d+)/start$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->start(
+            $claims,
+            (int) $matches[1]
+        );
+    }
+
+    if ($method === 'POST'
+        && preg_match(
+            '#^/api/v1/workday-events/(\d+)/complete$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->complete(
+            $claims,
+            (int) $matches[1]
+        );
+    }
+
+    if ($method === 'POST'
+        && preg_match(
+            '#^/api/v1/workday-events/(\d+)/cancel$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new WorkdayEventController())->technicianCancel(
+            $claims,
+            (int) $matches[1]
+        );
+    }
+
+    if ($method === 'POST'
+        && $path === '/api/v1/devices/register') {
+        $claims = AuthMiddleware::authenticate();
+        (new DeviceController())->register($claims);
     }
 
     Response::error(404, 'not_found', 'El endpoint solicitado no existe.');

@@ -42,7 +42,7 @@ ejecutará.
   durante la misma jornada.
 - `POST /api/v1/attendance/check-out`: registra la salida del usuario
   autenticado. Exige una entrada previa, valida un radio máximo de 50 metros,
-  evita salidas duplicadas y solicita justificación antes de las 6:00 p. m.
+  evita salidas duplicadas y solicita justificación antes de las 5:00 p. m.
 - `GET /api/v1/admin/dashboard`: devuelve métricas, usuarios, roles,
   supervisores, técnicos y sus asignaciones. Requiere rol Administrador.
 - `PUT /api/v1/admin/users/{id}/role`: cambia el rol de un usuario.
@@ -51,6 +51,20 @@ ejecutará.
   supervisor. Cada técnico conserva como máximo un supervisor activo.
 - `DELETE /api/v1/admin/supervisor-assignments/{technicianId}`: retira la
   asignación activa de un técnico.
+- `POST /api/v1/admin/locations`: crea una ubicación autorizada.
+- `PUT /api/v1/admin/locations/{id}`: actualiza los datos, coordenadas y
+  estado de una ubicación.
+- `DELETE /api/v1/admin/locations/{id}`: elimina una ubicación sin
+  marcaciones. Si ya posee historial de asistencia, la archiva para conservar
+  la integridad de los registros.
+- `GET /api/v1/supervisor/dashboard?date=YYYY-MM-DD`: devuelve únicamente los
+  técnicos asignados al supervisor autenticado, junto con el estado y detalle
+  de sus entradas y salidas. Considera tarde una entrada posterior a las
+  8:00 a. m. y temprana una salida anterior a las 5:00 p. m.
+- `GET /api/v1/supervisor/report?days=15`: genera el historial de los técnicos
+  asignados al supervisor autenticado durante la cantidad de días solicitada.
+  Admite entre 1 y 365 días e incluye fechas, entradas, salidas, ubicaciones,
+  comentarios y métricas del período.
 
 Para asegurar que existan los roles `Administrador`, `Supervisor` y `Técnico`,
 ejecuta una vez `database/admin_roles_setup.sql` desde phpMyAdmin. El mismo
@@ -66,3 +80,39 @@ https://tudominio.com/api-asistencia/api/v1/account/me
 
 Las contraseñas de `Usuarios.password_hash` deben estar creadas mediante
 `password_hash($password, PASSWORD_BCRYPT)`.
+
+## Eventos de la jornada
+
+Antes de publicar el módulo, ejecuta una vez
+`database/workday_events_setup.sql`. El script agrega los mensajes del
+supervisor, el índice de estados y la tabla de dispositivos.
+
+Endpoints agregados:
+
+- `GET|POST /api/v1/supervisor/workday-events`
+- `PATCH /api/v1/supervisor/workday-events/{id}/cancel`
+- `POST /api/v1/supervisor/workday-events/{id}/request-cancellation`
+- `GET /api/v1/workday-events/today`
+- `PATCH /api/v1/workday-events/{id}/comment`
+- `POST /api/v1/workday-events/{id}/start`
+- `POST /api/v1/workday-events/{id}/complete`
+- `POST /api/v1/workday-events/{id}/cancel`
+- `POST /api/v1/devices/register`
+
+La salida de asistencia queda bloqueada mientras exista una misión
+`EN_TRAYECTO`.
+
+## Notificaciones push
+
+El aviso dentro de la aplicación funciona aunque Firebase no esté
+configurado. Para activar el push:
+
+1. Crea una aplicación Android en Firebase con el mismo `ApplicationId`.
+2. Coloca `google-services.json` dentro de `Interfaz_Usuario` antes de
+   compilar Android.
+3. Guarda la cuenta de servicio de Firebase fuera de `public_html`.
+4. Define `FCM_SERVICE_ACCOUNT_PATH` en `BD_credentials.php`.
+5. Activa Firebase Cloud Messaging API (HTTP v1).
+
+Nunca publiques la cuenta de servicio. Si Firebase falla, la misión permanece
+guardada y el técnico la verá al abrir la aplicación.

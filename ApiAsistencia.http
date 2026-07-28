@@ -85,3 +85,48 @@ Content-Type: application/json
 
 DELETE {{ApiBaseUrl}}/api/v1/admin/supervisor-assignments/4
 Authorization: Bearer {{Token}}
+
+###
+
+POST {{ApiBaseUrl}}/api/v1/admin/locations
+Authorization: Bearer {{Token}}
+Content-Type: application/json
+
+{
+  "name": "Proyecto Centro",
+  "address": "Calle principal, local 10",
+  "city": "San Salvador",
+  "latitude": 13.692900,
+  "longitude": -89.218200,
+  "active": true
+}
+
+###
+
+PUT {{ApiBaseUrl}}/api/v1/admin/locations/1
+Authorization: Bearer {{Token}}
+Content-Type: application/json
+
+{
+  "name": "Proyecto Centro",
+  "address": "Calle principal, local 12",
+  "city": "San Salvador",
+  "latitude": 13.692900,
+  "longitude": -89.218200,
+  "active": true
+}
+
+###
+
+DELETE {{ApiBaseUrl}}/api/v1/admin/locations/1
+Authorization: Bearer {{Token}}
+
+###
+
+GET {{ApiBaseUrl}}/api/v1/supervisor/dashboard?date=2026-07-27
+Authorization: Bearer {{Token}}
+
+###
+
+GET {{ApiBaseUrl}}/api/v1/supervisor/report?days=15
+Authorization: Bearer {{Token}}

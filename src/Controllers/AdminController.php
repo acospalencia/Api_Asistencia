@@ -9,6 +9,7 @@ use JsonException;
 use Nordictech\Api\Data\Database;
 use Nordictech\Api\Http\Response;
 use PDO;
+use PDOException;
 use Throwable;
 
 final class AdminController
@@ -180,6 +181,42 @@ final class AdminController
                 )
             ));
 
+            $locationRows = $connection->query(
+                'SELECT
+                    l.id_ubicacion,
+                    l.nombre_lugar,
+                    l.direccion,
+                    l.ciudad,
+                    l.latitud_esperada,
+                    l.longitud_esperada,
+                    CAST(l.estado_activo AS UNSIGNED) AS estado_activo,
+                    (
+                        SELECT COUNT(*)
+                        FROM Asistencia_Entrada e
+                        WHERE e.id_ubicacion = l.id_ubicacion
+                    ) + (
+                        SELECT COUNT(*)
+                        FROM Asistencia_Salida s
+                        WHERE s.id_ubicacion = l.id_ubicacion
+                    ) AS cantidad_uso
+                 FROM Ubicaciones l
+                 ORDER BY l.estado_activo DESC, l.nombre_lugar'
+            )->fetchAll();
+
+            $locations = array_map(
+                static fn (array $location): array => [
+                    'id' => (int) $location['id_ubicacion'],
+                    'name' => (string) $location['nombre_lugar'],
+                    'address' => $location['direccion'],
+                    'city' => $location['ciudad'],
+                    'latitude' => (float) $location['latitud_esperada'],
+                    'longitude' => (float) $location['longitud_esperada'],
+                    'active' => (int) $location['estado_activo'] === 1,
+                    'usageCount' => (int) $location['cantidad_uso'],
+                ],
+                $locationRows
+            );
+
             $technicianCount = (int) ($metrics['tecnicos'] ?? 0);
         } catch (Throwable $exception) {
             error_log(
@@ -209,6 +246,7 @@ final class AdminController
             'users' => $users,
             'supervisors' => $supervisors,
             'technicians' => $technicians,
+            'locations' => $locations,
         ]);
     }
 
@@ -602,6 +640,256 @@ final class AdminController
         ]);
     }
 
+    /** @param array<string, mixed> $claims */
+    public function createLocation(array $claims): never
+    {
+        $connection = $this->requireAdministrator($claims);
+        $location = $this->locationPayload($this->requestBody());
+        $activeSql = $location['active'] ? "b'1'" : "b'0'";
+
+        try {
+            $statement = $connection->prepare(
+                'INSERT INTO Ubicaciones (
+                    nombre_lugar,
+                    direccion,
+                    ciudad,
+                    latitud_esperada,
+                    longitud_esperada,
+                    estado_activo
+                 ) VALUES (
+                    :nombre_lugar,
+                    :direccion,
+                    :ciudad,
+                    :latitud_esperada,
+                    :longitud_esperada,
+                    ' . $activeSql . '
+                 )'
+            );
+            $statement->execute([
+                'nombre_lugar' => $location['name'],
+                'direccion' => $location['address'],
+                'ciudad' => $location['city'],
+                'latitud_esperada' => $location['latitude'],
+                'longitud_esperada' => $location['longitude'],
+            ]);
+            $locationId = (int) $connection->lastInsertId();
+        } catch (PDOException $exception) {
+            if ($exception->getCode() === '23000') {
+                Response::error(
+                    409,
+                    'location_name_exists',
+                    'Ya existe una ubicación con ese nombre.'
+                );
+            }
+
+            error_log(
+                '[API Asistencia][admin_location_create] '
+                . $exception->getMessage()
+            );
+            Response::error(
+                503,
+                'location_create_unavailable',
+                'No fue posible crear la ubicación.'
+            );
+        } catch (Throwable $exception) {
+            error_log(
+                '[API Asistencia][admin_location_create] '
+                . $exception->getMessage()
+            );
+            Response::error(
+                503,
+                'location_create_unavailable',
+                'No fue posible crear la ubicación.'
+            );
+        }
+
+        Response::json([
+            'message' => 'Ubicación creada correctamente.',
+            'locationId' => $locationId,
+        ], 201);
+    }
+
+    /** @param array<string, mixed> $claims */
+    public function updateLocation(
+        array $claims,
+        int $locationId
+    ): never {
+        $connection = $this->requireAdministrator($claims);
+        if ($locationId <= 0) {
+            Response::error(
+                422,
+                'invalid_location',
+                'La ubicación solicitada no es válida.'
+            );
+        }
+
+        $location = $this->locationPayload($this->requestBody());
+        $activeSql = $location['active'] ? "b'1'" : "b'0'";
+
+        try {
+            $existsStatement = $connection->prepare(
+                'SELECT id_ubicacion
+                 FROM Ubicaciones
+                 WHERE id_ubicacion = :id_ubicacion
+                 LIMIT 1'
+            );
+            $existsStatement->execute(['id_ubicacion' => $locationId]);
+            if ($existsStatement->fetchColumn() === false) {
+                Response::error(
+                    404,
+                    'location_not_found',
+                    'La ubicación indicada no existe.'
+                );
+            }
+
+            $statement = $connection->prepare(
+                'UPDATE Ubicaciones
+                 SET nombre_lugar = :nombre_lugar,
+                     direccion = :direccion,
+                     ciudad = :ciudad,
+                     latitud_esperada = :latitud_esperada,
+                     longitud_esperada = :longitud_esperada,
+                     estado_activo = ' . $activeSql . '
+                 WHERE id_ubicacion = :id_ubicacion'
+            );
+            $statement->execute([
+                'nombre_lugar' => $location['name'],
+                'direccion' => $location['address'],
+                'ciudad' => $location['city'],
+                'latitud_esperada' => $location['latitude'],
+                'longitud_esperada' => $location['longitude'],
+                'id_ubicacion' => $locationId,
+            ]);
+        } catch (PDOException $exception) {
+            if ($exception->getCode() === '23000') {
+                Response::error(
+                    409,
+                    'location_name_exists',
+                    'Ya existe otra ubicación con ese nombre.'
+                );
+            }
+
+            error_log(
+                '[API Asistencia][admin_location_update] '
+                . $exception->getMessage()
+            );
+            Response::error(
+                503,
+                'location_update_unavailable',
+                'No fue posible actualizar la ubicación.'
+            );
+        } catch (Throwable $exception) {
+            error_log(
+                '[API Asistencia][admin_location_update] '
+                . $exception->getMessage()
+            );
+            Response::error(
+                503,
+                'location_update_unavailable',
+                'No fue posible actualizar la ubicación.'
+            );
+        }
+
+        Response::json([
+            'message' => 'Ubicación actualizada correctamente.',
+            'locationId' => $locationId,
+        ]);
+    }
+
+    /** @param array<string, mixed> $claims */
+    public function deleteLocation(
+        array $claims,
+        int $locationId
+    ): never {
+        $connection = $this->requireAdministrator($claims);
+        if ($locationId <= 0) {
+            Response::error(
+                422,
+                'invalid_location',
+                'La ubicación solicitada no es válida.'
+            );
+        }
+
+        try {
+            $connection->beginTransaction();
+            $statement = $connection->prepare(
+                'SELECT
+                    l.nombre_lugar,
+                    (
+                        SELECT COUNT(*)
+                        FROM Asistencia_Entrada e
+                        WHERE e.id_ubicacion = l.id_ubicacion
+                    ) + (
+                        SELECT COUNT(*)
+                        FROM Asistencia_Salida s
+                        WHERE s.id_ubicacion = l.id_ubicacion
+                    ) AS cantidad_uso
+                 FROM Ubicaciones l
+                 WHERE l.id_ubicacion = :id_ubicacion
+                 LIMIT 1
+                 FOR UPDATE'
+            );
+            $statement->execute(['id_ubicacion' => $locationId]);
+            $existingLocation = $statement->fetch();
+
+            if (!is_array($existingLocation)) {
+                $connection->rollBack();
+                Response::error(
+                    404,
+                    'location_not_found',
+                    'La ubicación indicada no existe.'
+                );
+            }
+
+            $usageCount = (int) $existingLocation['cantidad_uso'];
+            if ($usageCount > 0) {
+                $archiveStatement = $connection->prepare(
+                    "UPDATE Ubicaciones
+                     SET estado_activo = b'0'
+                     WHERE id_ubicacion = :id_ubicacion"
+                );
+                $archiveStatement->execute([
+                    'id_ubicacion' => $locationId,
+                ]);
+                $connection->commit();
+
+                Response::json([
+                    'message' =>
+                        'La ubicación tiene marcaciones históricas y fue archivada.',
+                    'deleted' => false,
+                    'archived' => true,
+                ]);
+            }
+
+            $deleteStatement = $connection->prepare(
+                'DELETE FROM Ubicaciones
+                 WHERE id_ubicacion = :id_ubicacion'
+            );
+            $deleteStatement->execute(['id_ubicacion' => $locationId]);
+            $connection->commit();
+        } catch (Throwable $exception) {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
+
+            error_log(
+                '[API Asistencia][admin_location_delete] '
+                . $exception->getMessage()
+            );
+            Response::error(
+                503,
+                'location_delete_unavailable',
+                'No fue posible eliminar la ubicación.'
+            );
+        }
+
+        Response::json([
+            'message' => 'Ubicación eliminada correctamente.',
+            'deleted' => true,
+            'archived' => false,
+        ]);
+    }
+
     /**
      * @param array<string, mixed> $claims
      */
@@ -650,6 +938,104 @@ final class AdminController
         }
 
         return $connection;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array{
+     *     name: string,
+     *     address: ?string,
+     *     city: ?string,
+     *     latitude: float,
+     *     longitude: float,
+     *     active: bool
+     * }
+     */
+    private function locationPayload(array $body): array
+    {
+        $name = trim((string) ($body['name'] ?? ''));
+        $address = trim((string) ($body['address'] ?? ''));
+        $city = trim((string) ($body['city'] ?? ''));
+        $latitude = filter_var(
+            $body['latitude'] ?? null,
+            FILTER_VALIDATE_FLOAT
+        );
+        $longitude = filter_var(
+            $body['longitude'] ?? null,
+            FILTER_VALIDATE_FLOAT
+        );
+        $active = $body['active'] ?? true;
+
+        if ($name === '') {
+            Response::error(
+                422,
+                'location_name_required',
+                'Debe indicar el nombre de la ubicación.'
+            );
+        }
+
+        if (strlen($name) > 100) {
+            Response::error(
+                422,
+                'location_name_too_long',
+                'El nombre no puede superar los 100 caracteres.'
+            );
+        }
+
+        if (strlen($address) > 255) {
+            Response::error(
+                422,
+                'location_address_too_long',
+                'La dirección no puede superar los 255 caracteres.'
+            );
+        }
+
+        if (strlen($city) > 50) {
+            Response::error(
+                422,
+                'location_city_too_long',
+                'La ciudad no puede superar los 50 caracteres.'
+            );
+        }
+
+        if ($latitude === false
+            || !is_finite($latitude)
+            || $latitude < -90
+            || $latitude > 90) {
+            Response::error(
+                422,
+                'invalid_location_latitude',
+                'La latitud debe estar entre -90 y 90.'
+            );
+        }
+
+        if ($longitude === false
+            || !is_finite($longitude)
+            || $longitude < -180
+            || $longitude > 180) {
+            Response::error(
+                422,
+                'invalid_location_longitude',
+                'La longitud debe estar entre -180 y 180.'
+            );
+        }
+
+        if (!is_bool($active)) {
+            Response::error(
+                422,
+                'invalid_location_status',
+                'El estado de la ubicación no es válido.'
+            );
+        }
+
+        return [
+            'name' => $name,
+            'address' => $address === '' ? null : $address,
+            'city' => $city === '' ? null : $city,
+            'latitude' => (float) $latitude,
+            'longitude' => (float) $longitude,
+            'active' => $active,
+        ];
     }
 
     /** @return array<string, mixed> */

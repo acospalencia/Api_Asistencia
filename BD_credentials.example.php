@@ -16,3 +16,6 @@ define('JWT_SECRET', 'OTRA_LLAVE_ALEATORIA_DE_64_CARACTERES_PARA_LA_API');
 define('JWT_ISSUER', 'Nordictech.Asistencia.Api');
 define('JWT_AUDIENCE', 'Nordictech.Asistencia.Client');
 define('JWT_EXPIRATION_MINUTES', 60);
+
+// Ruta absoluta recomendada, fuera de public_html.
+// define('FCM_SERVICE_ACCOUNT_PATH', '/home/usuario/firebase-service-account.json');
