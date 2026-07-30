@@ -171,12 +171,63 @@ final class SupervisorController
         $supervisorId = (int) ($claims['sub'] ?? 0);
         $timezone = new DateTimeZone('America/El_Salvador');
         $days = $this->requestedReportDays();
+        $selectedTechnicianId = $this->requestedReportTechnicianId();
         $endDate = new DateTimeImmutable('today', $timezone);
         $startDate = $endDate->modify(
             sprintf('-%d days', $days - 1)
         );
 
         try {
+            $availableStatement = $connection->prepare(
+                "SELECT
+                    t.id_usuario AS tecnico_id,
+                    t.username AS tecnico_username,
+                    TRIM(CONCAT(dp.nombres, ' ', dp.apellidos))
+                        AS tecnico_nombre
+                 FROM Asignacion_Supervisores a
+                 INNER JOIN Usuarios t ON t.id_usuario = a.id_tecnico
+                 INNER JOIN Roles r ON r.id_rol = t.id_rol
+                 INNER JOIN Datos_Personales dp
+                    ON dp.id_datos_personales = t.id_datos_personales
+                 WHERE a.id_supervisor = :id_supervisor
+                   AND a.estado_activo = 1
+                   AND t.estado_activo = 1
+                   AND LOWER(r.nombre_rol) IN ('tecnico', 'técnico')
+                 ORDER BY dp.nombres, dp.apellidos"
+            );
+            $availableStatement->execute([
+                'id_supervisor' => $supervisorId,
+            ]);
+            $availableRows = $availableStatement->fetchAll();
+
+            $availableTechnicians = array_map(
+                static fn (array $row): array => [
+                    'id' => (int) $row['tecnico_id'],
+                    'username' => (string) $row['tecnico_username'],
+                    'fullName' => (string) $row['tecnico_nombre'],
+                ],
+                $availableRows
+            );
+
+            if ($selectedTechnicianId > 0) {
+                $isAssigned = false;
+                foreach ($availableTechnicians as $availableTechnician) {
+                    if ($availableTechnician['id']
+                        === $selectedTechnicianId) {
+                        $isAssigned = true;
+                        break;
+                    }
+                }
+
+                if (!$isAssigned) {
+                    Response::error(
+                        422,
+                        'invalid_report_technician',
+                        'El técnico seleccionado no está asignado a este supervisor.'
+                    );
+                }
+            }
+
             $statement = $connection->prepare(
                 "SELECT
                     t.id_usuario AS tecnico_id,
@@ -211,6 +262,10 @@ final class SupervisorController
                    AND a.estado_activo = 1
                    AND t.estado_activo = 1
                    AND LOWER(r.nombre_rol) IN ('tecnico', 'técnico')
+                   AND (
+                        :selected_technician = 0
+                        OR t.id_usuario = :selected_technician_filter
+                   )
                  ORDER BY
                     dp.nombres,
                     dp.apellidos,
@@ -220,8 +275,54 @@ final class SupervisorController
                 'start_date' => $startDate->format('Y-m-d'),
                 'end_date' => $endDate->format('Y-m-d'),
                 'id_supervisor' => $supervisorId,
+                'selected_technician' => $selectedTechnicianId,
+                'selected_technician_filter' => $selectedTechnicianId,
             ]);
             $rows = $statement->fetchAll();
+
+            $missionStatement = $connection->prepare(
+                "SELECT
+                    t.id_usuario AS tecnico_id,
+                    j.fecha_jornada,
+                    ev.id_evento,
+                    ev.tipo_evento,
+                    ev.descripcion_mision,
+                    ev.comentario_tecnico,
+                    ev.mensaje_supervisor,
+                    ev.estado_evento,
+                    ev.hora_asignacion,
+                    ev.hora_inicio_trayecto,
+                    ev.hora_fin_trayecto
+                 FROM Eventos_Jornada ev
+                 INNER JOIN Jornadas j
+                    ON j.id_jornada = ev.id_jornada
+                 INNER JOIN Usuarios t
+                    ON t.id_usuario = j.id_usuario
+                 INNER JOIN Asignacion_Supervisores a
+                    ON a.id_tecnico = t.id_usuario
+                   AND a.id_supervisor = :mission_supervisor
+                   AND a.estado_activo = 1
+                 WHERE ev.id_supervisor_autoriza = :event_supervisor
+                   AND j.fecha_jornada
+                        BETWEEN :mission_start_date AND :mission_end_date
+                   AND (
+                        :mission_technician = 0
+                        OR t.id_usuario = :mission_technician_filter
+                   )
+                 ORDER BY
+                    t.id_usuario,
+                    j.fecha_jornada DESC,
+                    ev.hora_asignacion"
+            );
+            $missionStatement->execute([
+                'mission_supervisor' => $supervisorId,
+                'event_supervisor' => $supervisorId,
+                'mission_start_date' => $startDate->format('Y-m-d'),
+                'mission_end_date' => $endDate->format('Y-m-d'),
+                'mission_technician' => $selectedTechnicianId,
+                'mission_technician_filter' => $selectedTechnicianId,
+            ]);
+            $missionRows = $missionStatement->fetchAll();
         } catch (Throwable $exception) {
             error_log(
                 '[API Asistencia][supervisor_report] '
@@ -235,6 +336,7 @@ final class SupervisorController
         }
 
         $technicians = [];
+        $recordIndexes = [];
         $daysWithActivity = 0;
         $completeDays = 0;
         $checkIns = 0;
@@ -254,6 +356,7 @@ final class SupervisorController
                         . ' '
                         . (string) $row['apellidos']
                     ),
+                    'totalOvertimeMinutes' => 0,
                     'records' => [],
                 ];
             }
@@ -277,6 +380,14 @@ final class SupervisorController
             $isEarly = $checkOutDate !== null
                 && $checkOutDate->format('H:i:s')
                     < self::EARLY_CHECK_OUT_TIME;
+            $overtimeMinutes = $this->overtimeMinutes(
+                $checkInDate,
+                $checkOutDate,
+                $recordDate,
+                $timezone
+            );
+            $technicians[$technicianId]['totalOvertimeMinutes'] +=
+                $overtimeMinutes;
 
             if ($checkInDate !== null || $checkOutDate !== null) {
                 $daysWithActivity++;
@@ -300,8 +411,12 @@ final class SupervisorController
                 }
             }
 
+            $recordIndex = count(
+                $technicians[$technicianId]['records']
+            );
             $technicians[$technicianId]['records'][] = [
                 'date' => $recordDate,
+                'overtimeMinutes' => $overtimeMinutes,
                 'checkIn' => [
                     'registered' => $checkInDate !== null,
                     'registeredAt' => $checkInDate?->format(DATE_ATOM),
@@ -316,13 +431,84 @@ final class SupervisorController
                     'locationName' => $row['ubicacion_salida'],
                     'comment' => $row['comentario_retiro_anticipado'],
                 ],
+                'missions' => [],
             ];
+            $recordIndexes[$technicianId][$recordDate] = $recordIndex;
+        }
+
+        foreach ($missionRows as $missionRow) {
+            $technicianId = (int) $missionRow['tecnico_id'];
+            $recordDate = (string) $missionRow['fecha_jornada'];
+            if (!isset($technicians[$technicianId])) {
+                continue;
+            }
+
+            if (!isset($recordIndexes[$technicianId][$recordDate])) {
+                $recordIndex = count(
+                    $technicians[$technicianId]['records']
+                );
+                $technicians[$technicianId]['records'][] = [
+                    'date' => $recordDate,
+                    'overtimeMinutes' => 0,
+                    'checkIn' => [
+                        'registered' => false,
+                        'registeredAt' => null,
+                        'late' => false,
+                        'locationName' => null,
+                        'comment' => null,
+                    ],
+                    'checkOut' => [
+                        'registered' => false,
+                        'registeredAt' => null,
+                        'early' => false,
+                        'locationName' => null,
+                        'comment' => null,
+                    ],
+                    'missions' => [],
+                ];
+                $recordIndexes[$technicianId][$recordDate] =
+                    $recordIndex;
+            }
+
+            $recordIndex =
+                $recordIndexes[$technicianId][$recordDate];
+            $assignedAt = $this->dateValue(
+                $missionRow['hora_asignacion'],
+                $timezone
+            );
+            $startedAt = $this->dateValue(
+                $missionRow['hora_inicio_trayecto'],
+                $timezone
+            );
+            $finishedAt = $this->dateValue(
+                $missionRow['hora_fin_trayecto'],
+                $timezone
+            );
+
+            $technicians[$technicianId]['records'][$recordIndex]
+                ['missions'][] = [
+                    'id' => (int) $missionRow['id_evento'],
+                    'type' => (string) $missionRow['tipo_evento'],
+                    'description' =>
+                        (string) $missionRow['descripcion_mision'],
+                    'status' => (string) $missionRow['estado_evento'],
+                    'assignedAt' => $assignedAt?->format(DATE_ATOM),
+                    'startedAt' => $startedAt?->format(DATE_ATOM),
+                    'finishedAt' => $finishedAt?->format(DATE_ATOM),
+                    'technicianComment' =>
+                        $missionRow['comentario_tecnico'],
+                    'supervisorMessage' =>
+                        $missionRow['mensaje_supervisor'],
+                ];
         }
 
         Response::json([
             'startDate' => $startDate->format('Y-m-d'),
             'endDate' => $endDate->format('Y-m-d'),
             'days' => $days,
+            'selectedTechnicianId' => $selectedTechnicianId > 0
+                ? $selectedTechnicianId
+                : null,
             'generatedAt' => (new DateTimeImmutable('now', $timezone))
                 ->format(DATE_ATOM),
             'metrics' => [
@@ -334,6 +520,7 @@ final class SupervisorController
                 'checkOuts' => $checkOuts,
                 'earlyCheckOuts' => $earlyCheckOuts,
             ],
+            'availableTechnicians' => $availableTechnicians,
             'technicians' => array_values($technicians),
         ]);
     }
@@ -410,6 +597,26 @@ final class SupervisorController
         return $days;
     }
 
+    private function requestedReportTechnicianId(): int
+    {
+        $requestedId = trim(
+            (string) ($_GET['technicianId'] ?? '0')
+        );
+        if ($requestedId === '' || $requestedId === '0') {
+            return 0;
+        }
+
+        if (!ctype_digit($requestedId) || (int) $requestedId <= 0) {
+            Response::error(
+                422,
+                'invalid_report_technician',
+                'El técnico seleccionado no es válido.'
+            );
+        }
+
+        return (int) $requestedId;
+    }
+
     private function requestedDate(DateTimeZone $timezone): string
     {
         $requestedDate = trim((string) ($_GET['date'] ?? ''));
@@ -438,6 +645,41 @@ final class SupervisorController
         }
 
         return $requestedDate;
+    }
+
+    private function overtimeMinutes(
+        ?DateTimeImmutable $checkIn,
+        ?DateTimeImmutable $checkOut,
+        string $recordDate,
+        DateTimeZone $timezone
+    ): int {
+        $scheduledStart = new DateTimeImmutable(
+            $recordDate . ' ' . self::LATE_CHECK_IN_TIME,
+            $timezone
+        );
+        $scheduledEnd = new DateTimeImmutable(
+            $recordDate . ' ' . self::EARLY_CHECK_OUT_TIME,
+            $timezone
+        );
+        $minutes = 0;
+
+        if ($checkIn !== null && $checkIn < $scheduledStart) {
+            $minutes += intdiv(
+                $scheduledStart->getTimestamp()
+                    - $checkIn->getTimestamp(),
+                60
+            );
+        }
+
+        if ($checkOut !== null && $checkOut > $scheduledEnd) {
+            $minutes += intdiv(
+                $checkOut->getTimestamp()
+                    - $scheduledEnd->getTimestamp(),
+                60
+            );
+        }
+
+        return max(0, $minutes);
     }
 
     private function dateValue(

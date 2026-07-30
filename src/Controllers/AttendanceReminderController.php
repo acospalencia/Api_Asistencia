@@ -21,13 +21,33 @@ final class AttendanceReminderController
     private const CHECK_OUT_WINDOW_START = 17 * 60;
     private const CHECK_OUT_WINDOW_END = 17 * 60 + 5;
 
-    public function run(): never
+    public function run(
+        ?string $forcedType = null,
+        ?string $testUsername = null
+    ): never
     {
         $this->requireCronSecret();
 
         $timezone = new DateTimeZone(self::TIMEZONE);
         $now = new DateTimeImmutable('now', $timezone);
-        $reminderType = $this->reminderType($now);
+        $testMode = $forcedType !== null || $testUsername !== null;
+
+        if ($testMode) {
+            $forcedType = strtoupper(trim((string) $forcedType));
+            $testUsername = trim((string) $testUsername);
+            if (!in_array($forcedType, ['CHECK_IN', 'CHECK_OUT'], true)
+                || $testUsername === '') {
+                Response::error(
+                    422,
+                    'invalid_reminder_test',
+                    'La prueba requiere tipo CHECK_IN o CHECK_OUT y un usuario.'
+                );
+            }
+        }
+
+        $reminderType = $testMode
+            ? $forcedType
+            : $this->reminderType($now);
 
         if ($reminderType === null) {
             Response::json([
@@ -40,22 +60,40 @@ final class AttendanceReminderController
 
         try {
             $connection = Database::connection();
-            $userIds = $this->pendingUserIds(
-                $connection,
-                $reminderType,
-                $now->format('Y-m-d')
-            );
+            $date = $now->format('Y-m-d');
+
+            if (!$testMode
+                && $this->isNonWorkingDay($connection, $date)) {
+                Response::json([
+                    'message' =>
+                        'Hoy es un día sin marcación; no se enviaron recordatorios.',
+                    'localTime' => $now->format(DATE_ATOM),
+                    'processedUsers' => 0,
+                    'sentMessages' => 0,
+                ]);
+            }
+
+            $userIds = $testMode
+                ? [$this->testUserId($connection, $testUsername)]
+                : $this->pendingUserIds(
+                    $connection,
+                    $reminderType,
+                    $date
+                );
 
             $processedUsers = 0;
             $sentMessages = 0;
+            $skippedAlreadyProcessed = 0;
+            $deliveryResults = [];
 
             foreach ($userIds as $userId) {
-                if (!$this->claimReminder(
+                if (!$testMode && !$this->claimReminder(
                     $connection,
                     $userId,
-                    $now->format('Y-m-d'),
+                    $date,
                     $reminderType
                 )) {
+                    $skippedAlreadyProcessed++;
                     continue;
                 }
 
@@ -71,16 +109,26 @@ final class AttendanceReminderController
                     ]
                 );
 
-                $this->finishReminder(
-                    $connection,
-                    $userId,
-                    $now->format('Y-m-d'),
-                    $reminderType,
-                    $sent
-                );
+                if (!$testMode) {
+                    $this->finishReminder(
+                        $connection,
+                        $userId,
+                        $date,
+                        $reminderType,
+                        $sent
+                    );
+                }
 
                 $processedUsers++;
                 $sentMessages += $sent;
+                $deliveryResults[] = [
+                    'userId' => $userId,
+                    'sentMessages' => $sent,
+                    'errorCode' =>
+                        PushNotificationService::lastErrorCode(),
+                    'errorMessage' =>
+                        PushNotificationService::lastErrorMessage(),
+                ];
             }
         } catch (Throwable $exception) {
             error_log(
@@ -98,9 +146,13 @@ final class AttendanceReminderController
             'message' => 'Recordatorios de asistencia procesados.',
             'localTime' => $now->format(DATE_ATOM),
             'reminderType' => $reminderType,
+            'testMode' => $testMode,
+            'testUsername' => $testMode ? $testUsername : null,
             'pendingUsers' => count($userIds),
             'processedUsers' => $processedUsers,
             'sentMessages' => $sentMessages,
+            'skippedAlreadyProcessed' => $skippedAlreadyProcessed,
+            'deliveryResults' => $deliveryResults,
         ]);
     }
 
@@ -149,6 +201,47 @@ final class AttendanceReminderController
         }
 
         return null;
+    }
+
+    private function isNonWorkingDay(
+        PDO $connection,
+        string $date
+    ): bool {
+        $statement = $connection->prepare(
+            'SELECT 1
+             FROM Dias_No_Laborales
+             WHERE fecha = :fecha
+             LIMIT 1'
+        );
+        $statement->execute(['fecha' => $date]);
+        return $statement->fetchColumn() !== false;
+    }
+
+    private function testUserId(
+        PDO $connection,
+        string $username
+    ): int {
+        $statement = $connection->prepare(
+            "SELECT u.id_usuario
+             FROM Usuarios u
+             INNER JOIN Roles r ON r.id_rol = u.id_rol
+             WHERE u.username = :username
+               AND u.estado_activo = 1
+               AND LOWER(r.nombre_rol) IN ('tecnico', 'técnico')
+             LIMIT 1"
+        );
+        $statement->execute(['username' => $username]);
+        $userId = $statement->fetchColumn();
+
+        if ($userId === false) {
+            Response::error(
+                404,
+                'test_technician_not_found',
+                'No existe un técnico activo con ese usuario.'
+            );
+        }
+
+        return (int) $userId;
     }
 
     /**
@@ -233,7 +326,29 @@ final class AttendanceReminderController
             'tipo_recordatorio' => $reminderType,
         ]);
 
-        return $statement->rowCount() === 1;
+        if ($statement->rowCount() === 1) {
+            return true;
+        }
+
+        $retryStatement = $connection->prepare(
+            'SELECT envios_exitosos
+             FROM Recordatorios_Asistencia
+             WHERE id_usuario = :id_usuario
+               AND fecha_recordatorio = :fecha_recordatorio
+               AND tipo_recordatorio = :tipo_recordatorio
+             LIMIT 1'
+        );
+        $retryStatement->execute([
+            'id_usuario' => $userId,
+            'fecha_recordatorio' => $date,
+            'tipo_recordatorio' => $reminderType,
+        ]);
+        $successfulDeliveries = $retryStatement->fetchColumn();
+
+        // Si el intento anterior no entregó ningún mensaje, el siguiente
+        // minuto de la ventana vuelve a intentarlo.
+        return $successfulDeliveries !== false
+            && (int) $successfulDeliveries === 0;
     }
 
     private function finishReminder(

@@ -47,6 +47,11 @@ Content-Type: application/json
 
 ###
 
+GET {{ApiBaseUrl}}/api/v1/attendance/availability/today
+Authorization: Bearer {{Token}}
+
+###
+
 GET {{ApiBaseUrl}}/api/v1/admin/dashboard
 Authorization: Bearer {{Token}}
 
@@ -119,6 +124,27 @@ Content-Type: application/json
 ###
 
 DELETE {{ApiBaseUrl}}/api/v1/admin/locations/1
+Authorization: Bearer {{Token}}
+
+###
+
+GET {{ApiBaseUrl}}/api/v1/admin/non-working-days
+Authorization: Bearer {{Token}}
+
+###
+
+POST {{ApiBaseUrl}}/api/v1/admin/non-working-days
+Authorization: Bearer {{Token}}
+Content-Type: application/json
+
+{
+  "date": "2026-08-06",
+  "reason": "Asueto nacional"
+}
+
+###
+
+DELETE {{ApiBaseUrl}}/api/v1/admin/non-working-days/1
 Authorization: Bearer {{Token}}
 
 ###

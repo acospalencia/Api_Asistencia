@@ -11,17 +11,41 @@ use Nordictech\Api\Controllers\SupervisorController;
 use Nordictech\Api\Controllers\WorkdayEventController;
 use Nordictech\Api\Controllers\DeviceController;
 use Nordictech\Api\Controllers\AttendanceReminderController;
+use Nordictech\Api\Controllers\NonWorkingDayController;
 use Nordictech\Api\Http\AuthMiddleware;
+use Nordictech\Api\Http\RateLimiter;
 use Nordictech\Api\Http\Response;
 
 try {
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
     $path = api_request_path();
 
+    RateLimiter::enforce('global', 300, 60);
+
+    if ($method !== 'OPTIONS') {
+        if ($method === 'POST' && $path === '/api/v1/auth/login') {
+            RateLimiter::enforce('auth_login', 20, 300);
+        } elseif ($method === 'POST'
+            && $path === '/api/v1/auth/register') {
+            RateLimiter::enforce('auth_register', 10, 3600);
+        } elseif ($method === 'POST'
+            && $path === '/api/v1/cron/attendance-reminders') {
+            RateLimiter::enforce('cron_http', 30, 60);
+        } elseif (in_array(
+            $method,
+            ['POST', 'PUT', 'PATCH', 'DELETE'],
+            true
+        )) {
+            RateLimiter::enforce('api_writes', 60, 60);
+        } else {
+            RateLimiter::enforce('api_reads', 180, 60);
+        }
+    }
+
     if ($method === 'GET' && $path === '/api/v1/health') {
         Response::json([
             'status' => 'ok',
-            'apiVersion' => '2026.07.29.2',
+            'apiVersion' => '2026.07.29.9',
             'pdoMysql' => extension_loaded('pdo_mysql'),
         ]);
     }
@@ -61,6 +85,37 @@ try {
     if ($method === 'POST' && $path === '/api/v1/attendance/check-out') {
         $claims = AuthMiddleware::authenticate();
         (new AttendanceController())->checkOut($claims);
+    }
+
+    if ($method === 'GET'
+        && $path === '/api/v1/attendance/availability/today') {
+        $claims = AuthMiddleware::authenticate();
+        (new NonWorkingDayController())->today($claims);
+    }
+
+    if ($method === 'GET'
+        && $path === '/api/v1/admin/non-working-days') {
+        $claims = AuthMiddleware::authenticate();
+        (new NonWorkingDayController())->index($claims);
+    }
+
+    if ($method === 'POST'
+        && $path === '/api/v1/admin/non-working-days') {
+        $claims = AuthMiddleware::authenticate();
+        (new NonWorkingDayController())->create($claims);
+    }
+
+    if ($method === 'DELETE'
+        && preg_match(
+            '#^/api/v1/admin/non-working-days/(\d+)$#',
+            $path,
+            $matches
+        ) === 1) {
+        $claims = AuthMiddleware::authenticate();
+        (new NonWorkingDayController())->delete(
+            $claims,
+            (int) $matches[1]
+        );
     }
 
     if ($method === 'GET' && $path === '/api/v1/admin/dashboard') {

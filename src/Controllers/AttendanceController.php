@@ -122,9 +122,23 @@ final class AttendanceController
             );
         }
 
+        $now = new DateTimeImmutable(
+            'now',
+            new DateTimeZone('America/El_Salvador')
+        );
+
+        if ($now->format('H:i:s') > '08:00:00' && $comment === '') {
+            Response::error(
+                422,
+                'late_check_in_comment_required',
+                'Debe justificar la entrada realizada después de las 8:00 a. m.'
+            );
+        }
+
         try {
             $connection = Database::connection();
             $this->ensureActiveUser($connection, $userId);
+            $this->ensureWorkingDay($connection, $userId, $now);
 
             $locationStatement = $connection->prepare(
                 'SELECT
@@ -182,11 +196,6 @@ final class AttendanceController
                 )
             );
         }
-
-        $now = new DateTimeImmutable(
-            'now',
-            new DateTimeZone('America/El_Salvador')
-        );
 
         try {
             $connection->beginTransaction();
@@ -370,6 +379,7 @@ final class AttendanceController
         try {
             $connection = Database::connection();
             $this->ensureActiveUser($connection, $userId);
+            $this->ensureWorkingDay($connection, $userId, $now);
 
             $locationStatement = $connection->prepare(
                 'SELECT
@@ -609,6 +619,48 @@ final class AttendanceController
 
         if ($statement->fetch() === false) {
             throw new InactiveUserException();
+        }
+    }
+
+    private function ensureWorkingDay(
+        PDO $connection,
+        int $userId,
+        DateTimeImmutable $date
+    ): void {
+        $roleStatement = $connection->prepare(
+            'SELECT r.nombre_rol
+             FROM Usuarios u
+             INNER JOIN Roles r ON r.id_rol = u.id_rol
+             WHERE u.id_usuario = :id_usuario
+             LIMIT 1'
+        );
+        $roleStatement->execute(['id_usuario' => $userId]);
+        $role = $roleStatement->fetchColumn();
+
+        if (!is_string($role)
+            || !in_array(
+                strtolower(trim($role)),
+                ['tecnico', 'técnico'],
+                true
+            )) {
+            return;
+        }
+
+        $statement = $connection->prepare(
+            'SELECT motivo
+             FROM Dias_No_Laborales
+             WHERE fecha = :fecha
+             LIMIT 1'
+        );
+        $statement->execute(['fecha' => $date->format('Y-m-d')]);
+        $reason = $statement->fetchColumn();
+
+        if (is_string($reason)) {
+            Response::error(
+                403,
+                'attendance_blocked_day',
+                'Hoy no se permite marcar asistencia. Motivo: ' . $reason
+            );
         }
     }
 

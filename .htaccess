@@ -1,4 +1,9 @@
 Options -Indexes
+ServerSignature Off
+
+# Evita que solicitudes con cuerpos anormalmente grandes consuman memoria.
+LimitRequestBody 1048576
+
 RewriteEngine On
 
 # Permite responder correctamente las solicitudes OPTIONS de CORS.

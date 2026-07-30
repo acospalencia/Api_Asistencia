@@ -19,6 +19,11 @@ $allowedOrigin = getenv('API_ALLOWED_ORIGIN') ?: '*';
 header('Access-Control-Allow-Origin: ' . $allowedOrigin);
 header('Access-Control-Allow-Headers: Authorization, Content-Type, X-Cron-Secret');
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+header(
+    'Access-Control-Expose-Headers: '
+    . 'X-RateLimit-Limit, X-RateLimit-Remaining, '
+    . 'X-RateLimit-Reset, Retry-After'
+);
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 

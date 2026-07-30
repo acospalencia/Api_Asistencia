@@ -3,10 +3,32 @@
 Versión PHP 8.2+ diseñada para Bluehost Shared Hosting. No necesita Composer,
 terminal ni un proceso permanente.
 
+Versión actual de la API: `2026.07.29.9`.
+
+Producción:
+
+```text
+https://api.nordictech-corp.com/
+https://api.nordictech-corp.com/api/v1/health
+```
+
+## Funcionalidades principales
+
+- Autenticación JWT y contraseñas protegidas con `password_hash`.
+- Gestión administrativa de usuarios, roles, asignaciones y ubicaciones.
+- Entradas y salidas con validación geográfica y reglas de horario.
+- Días sin marcación administrables y validados también en el servidor.
+- Misiones de jornada para supervisores y técnicos.
+- Reportes por técnico o por todos los técnicos asignados.
+- Horas extra por jornada y total individual por técnico.
+- Notificaciones push y recordatorios ejecutados mediante cron.
+- Rate limiting por dirección IP y límite de 1 MB por solicitud.
+
 ## Instalación con File Manager
 
 1. En Bluehost selecciona PHP 8.2 o superior.
-2. Dentro de `public_html`, crea la carpeta `api-asistencia`.
+2. Dentro de `public_html`, crea la carpeta que utilizará la API, por ejemplo
+   `api`.
 3. Sube dentro de ella todo el contenido de esta carpeta, incluida `.htaccess`.
 4. Copia `BD_credentials.example.php` como `BD_credentials.php`.
 5. Completa las credenciales y cambia `JWT_SECRET` por una llave aleatoria de
@@ -39,10 +61,13 @@ ejecutará.
 - `GET /api/v1/locations`: devuelve las ubicaciones activas autorizadas.
 - `POST /api/v1/attendance/check-in`: registra la entrada del usuario
   autenticado. Valida un radio máximo de 50 metros y evita entradas duplicadas
-  durante la misma jornada.
+  durante la misma jornada. Después de las 8:00 a. m. exige un comentario que
+  justifique la entrada tardía.
 - `POST /api/v1/attendance/check-out`: registra la salida del usuario
   autenticado. Exige una entrada previa, valida un radio máximo de 50 metros,
   evita salidas duplicadas y solicita justificación antes de las 5:00 p. m.
+- `GET /api/v1/attendance/availability/today`: indica si el técnico
+  autenticado puede marcar asistencia durante la fecha actual.
 - `GET /api/v1/admin/dashboard`: devuelve métricas, usuarios, roles,
   supervisores, técnicos y sus asignaciones. Requiere rol Administrador.
 - `PUT /api/v1/admin/users/{id}/role`: cambia el rol de un usuario.
@@ -57,29 +82,67 @@ ejecutará.
 - `DELETE /api/v1/admin/locations/{id}`: elimina una ubicación sin
   marcaciones. Si ya posee historial de asistencia, la archiva para conservar
   la integridad de los registros.
+- `GET /api/v1/admin/non-working-days`: consulta los días sin marcación.
+- `POST /api/v1/admin/non-working-days`: registra o actualiza una fecha y su
+  motivo. Solo admite la fecha actual o fechas futuras.
+- `DELETE /api/v1/admin/non-working-days/{id}`: vuelve a habilitar una fecha
+  para marcar asistencia.
 - `GET /api/v1/supervisor/dashboard?date=YYYY-MM-DD`: devuelve únicamente los
   técnicos asignados al supervisor autenticado, junto con el estado y detalle
   de sus entradas y salidas. Considera tarde una entrada posterior a las
   8:00 a. m. y temprana una salida anterior a las 5:00 p. m.
-- `GET /api/v1/supervisor/report?days=15`: genera el historial de los técnicos
-  asignados al supervisor autenticado durante la cantidad de días solicitada.
-  Admite entre 1 y 365 días e incluye fechas, entradas, salidas, ubicaciones,
-  comentarios y métricas del período.
+- `GET /api/v1/supervisor/report?days=15&technicianId=123`: genera el
+  historial independiente de supervisión. `days` admite de 1 a 365 y
+  `technicianId` es opcional; al omitirlo incluye a todos los técnicos
+  asignados. Devuelve entradas, salidas, indicadores de horario, ubicaciones,
+  comentarios y las misiones del período con su estado y observaciones.
+  También calcula por jornada y por técnico las horas extra acumuladas como
+  el tiempo marcado antes de las 8:00 a. m. más el tiempo marcado después de
+  las 5:00 p. m. No genera un total combinado entre técnicos: devuelve el
+  total individual de cada técnico y el detalle de cada día.
 
 Para asegurar que existan los roles `Administrador`, `Supervisor` y `Técnico`,
 ejecuta una vez `database/admin_roles_setup.sql` desde phpMyAdmin. El mismo
 archivo contiene una instrucción comentada para promover la primera cuenta
 administrativa.
 
-Si la carpeta se llama `api-asistencia`, las URLs serán:
+Antes de publicar la administración de días sin marcación, ejecuta una vez
+`database/non_working_days_setup.sql` desde phpMyAdmin. La API comprueba esta
+tabla tanto al consultar la disponibilidad como al intentar registrar una
+entrada o salida, de modo que una versión antigua de la aplicación tampoco
+puede omitir el bloqueo.
+
+Si la carpeta se llama `api`, las URLs serán:
 
 ```text
-https://tudominio.com/api-asistencia/api/v1/auth/login
-https://tudominio.com/api-asistencia/api/v1/account/me
+https://tudominio.com/api/v1/auth/login
+https://tudominio.com/api/v1/account/me
 ```
 
 Las contraseñas de `Usuarios.password_hash` deben estar creadas mediante
 `password_hash($password, PASSWORD_BCRYPT)`.
+
+## Rate limiting
+
+Todas las solicitudes HTTP se limitan por dirección IP antes de ejecutar los
+controladores. Los contadores usan archivos temporales con bloqueo exclusivo,
+por lo que funcionan entre los distintos procesos PHP de Bluehost sin
+necesitar Redis.
+
+- Límite global: 300 solicitudes por minuto.
+- Lecturas: 180 por minuto.
+- Escrituras: 60 por minuto.
+- Inicio de sesión: 20 intentos cada 5 minutos.
+- Registro: 10 solicitudes por hora.
+- Ejecución HTTP del cron: 30 solicitudes por minuto.
+
+Al superar un límite, la API responde con HTTP `429`, código
+`rate_limit_exceeded` y encabezado `Retry-After`. El comando CLI del cron no
+consume estos límites. Además, Apache rechaza cuerpos mayores de 1 MB antes de
+iniciar PHP.
+
+Este control reduce fuerza bruta y abuso por cliente, pero no reemplaza un
+WAF o CDN para ataques distribuidos de gran volumen.
 
 ## Eventos de la jornada
 
@@ -151,11 +214,62 @@ El endpoint usa la zona horaria `America/El_Salvador` y solamente procesa:
 - De 5:00 a 5:04 p. m.: técnicos con entrada registrada y sin salida.
 
 La tabla `Recordatorios_Asistencia` impide repetir el mismo aviso para un
-técnico durante el mismo día. Para ejecutarlo únicamente de lunes a viernes,
-usa `*/5 * * * 1-5` como expresión del cron.
+técnico durante el mismo día después de una entrega exitosa. Si Firebase no
+entrega ningún mensaje, vuelve a intentarlo en la siguiente ejecución dentro
+de la ventana de cinco minutos. Los días registrados en
+`Dias_No_Laborales` no generan recordatorios.
+
+La configuración más segura cuando no se conoce la zona horaria del servidor
+de Bluehost es ejecutar el proceso cada cinco minutos:
+
+```text
+*/5 * * * 1-5
+```
+
+PHP comprueba internamente la hora de El Salvador y sale inmediatamente fuera
+de las ventanas. Si cPanel confirma que el cron también usa
+`America/El_Salvador` y permite intervalos por minuto, se pueden usar
+`55-59 7 * * 1-5` y `0-4 17 * * 1-5` para aprovechar los reintentos.
+Ejecutar el comando normal fuera de esas ventanas no envía notificaciones.
+
+Para probar inmediatamente el envío a un solo técnico, sin esperar la hora
+programada, ejecuta el comando sin redirigir su salida:
+
+```text
+php -q /home/oicnjgmy/public_html/api/cron_recordatorios_asistencia.php --type=CHECK_IN --test-user=USUARIO_DEL_TECNICO
+```
+
+El resultado JSON debe mostrar `sentMessages: 1` o más. Si muestra cero,
+`deliveryResults` indicará si falta `FCM_SERVICE_ACCOUNT_PATH`, si el técnico
+no tiene un token registrado o si Firebase rechazó la solicitud. La prueba no
+crea un bloqueo diario y se puede repetir.
 
 Como alternativa, se puede invocar el endpoint protegido por HTTP:
 
 ```text
 /usr/bin/curl -fsS -X POST -H "Content-Type: application/json" -H "X-Cron-Secret: TU_CRON_SECRET" --data "{}" https://api.nordictech-corp.com/api/v1/cron/attendance-reminders >/dev/null 2>&1
 ```
+
+## Paquete de despliegue
+
+El archivo `src.zip` contiene los archivos necesarios para actualizar la API
+desde File Manager. Está generado sin `BD_credentials.php`, sin `.git` y sin
+la cuenta de servicio de Firebase.
+
+Al desplegar:
+
+1. Conserva el `BD_credentials.php` existente en el servidor.
+2. Sube `src.zip` a la raíz de la API.
+3. Extrae y sobrescribe los archivos del código.
+4. Comprueba `/api/v1/health`.
+5. Confirma que `apiVersion` sea `2026.07.29.9`.
+
+## Seguridad
+
+- Nunca publiques `BD_credentials.php`, `JWT_SECRET`, `CRON_SECRET` ni la
+  cuenta de servicio de Firebase.
+- Mantén HTTPS habilitado.
+- Conserva `.htaccess`; bloquea listados, limita el cuerpo y redirige las
+  rutas hacia `index.php`.
+- Las validaciones de rol, distancia, horario y días sin marcación se
+  ejecutan en el servidor aunque el cliente haya sido modificado.
