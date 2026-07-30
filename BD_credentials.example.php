@@ -19,3 +19,7 @@ define('JWT_EXPIRATION_MINUTES', 60);
 
 // Ruta absoluta recomendada, fuera de public_html.
 // define('FCM_SERVICE_ACCOUNT_PATH', '/home/usuario/firebase-service-account.json');
+
+// Llave privada usada exclusivamente por el cron de recordatorios.
+// Debe contener al menos 32 caracteres aleatorios.
+// define('CRON_SECRET', 'CAMBIA_ESTA_LLAVE_POR_UNA_ALEATORIA_DE_32_CARACTERES');

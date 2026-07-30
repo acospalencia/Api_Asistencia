@@ -17,7 +17,7 @@ spl_autoload_register(static function (string $class): void {
 
 $allowedOrigin = getenv('API_ALLOWED_ORIGIN') ?: '*';
 header('Access-Control-Allow-Origin: ' . $allowedOrigin);
-header('Access-Control-Allow-Headers: Authorization, Content-Type');
+header('Access-Control-Allow-Headers: Authorization, Content-Type, X-Cron-Secret');
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');

@@ -98,6 +98,7 @@ Endpoints agregados:
 - `POST /api/v1/workday-events/{id}/complete`
 - `POST /api/v1/workday-events/{id}/cancel`
 - `POST /api/v1/devices/register`
+- `POST /api/v1/cron/attendance-reminders`
 
 La salida de asistencia queda bloqueada mientras exista una misión
 `EN_TRAYECTO`.
@@ -116,3 +117,45 @@ configurado. Para activar el push:
 
 Nunca publiques la cuenta de servicio. Si Firebase falla, la misión permanece
 guardada y el técnico la verá al abrir la aplicación.
+
+Cuando un técnico registra una entrada o salida, la API también envía una
+notificación silenciosa al supervisor de su asignación activa. El supervisor
+debe haber iniciado sesión al menos una vez en el dispositivo para registrar
+su token. Android muestra estos avisos en el canal `Asistencia de técnicos`,
+sin sonido ni vibración.
+
+## Recordatorios automáticos de asistencia
+
+Ejecuta una sola vez `database/attendance_reminders_setup.sql` desde
+phpMyAdmin. Después agrega una llave aleatoria de al menos 32 caracteres en
+`BD_credentials.php`:
+
+```php
+define(
+    'CRON_SECRET',
+    'REEMPLAZA_ESTO_POR_UNA_LLAVE_ALEATORIA_DE_AL_MENOS_32_CARACTERES'
+);
+```
+
+Sube `cron_recordatorios_asistencia.php` en la carpeta raíz de la API y
+configura en el panel del hosting un cron que lo ejecute cada cinco minutos.
+Si la API se encuentra en `/home/oicnjgmy/public_html/api`, el comando es:
+
+```text
+php -q /home/oicnjgmy/public_html/api/cron_recordatorios_asistencia.php >/dev/null 2>&1
+```
+
+El endpoint usa la zona horaria `America/El_Salvador` y solamente procesa:
+
+- De 7:55 a 7:59 a. m.: técnicos activos que todavía no registraron entrada.
+- De 5:00 a 5:04 p. m.: técnicos con entrada registrada y sin salida.
+
+La tabla `Recordatorios_Asistencia` impide repetir el mismo aviso para un
+técnico durante el mismo día. Para ejecutarlo únicamente de lunes a viernes,
+usa `*/5 * * * 1-5` como expresión del cron.
+
+Como alternativa, se puede invocar el endpoint protegido por HTTP:
+
+```text
+/usr/bin/curl -fsS -X POST -H "Content-Type: application/json" -H "X-Cron-Secret: TU_CRON_SECRET" --data "{}" https://api.nordictech-corp.com/api/v1/cron/attendance-reminders >/dev/null 2>&1
+```

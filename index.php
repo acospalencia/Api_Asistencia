@@ -10,6 +10,7 @@ use Nordictech\Api\Controllers\RegisterController;
 use Nordictech\Api\Controllers\SupervisorController;
 use Nordictech\Api\Controllers\WorkdayEventController;
 use Nordictech\Api\Controllers\DeviceController;
+use Nordictech\Api\Controllers\AttendanceReminderController;
 use Nordictech\Api\Http\AuthMiddleware;
 use Nordictech\Api\Http\Response;
 
@@ -20,7 +21,7 @@ try {
     if ($method === 'GET' && $path === '/api/v1/health') {
         Response::json([
             'status' => 'ok',
-            'apiVersion' => '2026.07.28.4',
+            'apiVersion' => '2026.07.29.2',
             'pdoMysql' => extension_loaded('pdo_mysql'),
         ]);
     }
@@ -256,6 +257,11 @@ try {
         && $path === '/api/v1/devices/register') {
         $claims = AuthMiddleware::authenticate();
         (new DeviceController())->register($claims);
+    }
+
+    if ($method === 'POST'
+        && $path === '/api/v1/cron/attendance-reminders') {
+        (new AttendanceReminderController())->run();
     }
 
     Response::error(404, 'not_found', 'El endpoint solicitado no existe.');

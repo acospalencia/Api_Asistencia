@@ -20,7 +20,7 @@ final class PushNotificationService
         string $title,
         string $body,
         array $data = []
-    ): void {
+    ): int {
         try {
             $credentials = self::serviceAccount();
             if ($credentials === null) {
@@ -28,7 +28,7 @@ final class PushNotificationService
                     '[API Asistencia][push] Firebase no está configurado; '
                     . 'se conserva la notificación dentro de la aplicación.'
                 );
-                return;
+                return 0;
             }
 
             $connection = Database::connection();
@@ -41,10 +41,11 @@ final class PushNotificationService
             $statement->execute(['id_usuario' => $userId]);
             $tokens = $statement->fetchAll(\PDO::FETCH_COLUMN);
             if ($tokens === []) {
-                return;
+                return 0;
             }
 
             $accessToken = self::accessToken($credentials);
+            $sentCount = 0;
             foreach ($tokens as $token) {
                 if (!is_string($token) || $token === '') {
                     continue;
@@ -58,16 +59,21 @@ final class PushNotificationService
                     $body,
                     $data
                 );
-                if (!$sent) {
+                if ($sent) {
+                    $sentCount++;
+                } else {
                     error_log(
                         '[API Asistencia][push] Firebase rechazó una notificación.'
                     );
                 }
             }
+
+            return $sentCount;
         } catch (Throwable $exception) {
             error_log(
                 '[API Asistencia][push] ' . $exception->getMessage()
             );
+            return 0;
         }
     }
 
@@ -180,6 +186,16 @@ final class PushNotificationService
         string $body,
         array $data
     ): bool {
+        $silent = strtolower((string) ($data['silent'] ?? 'false')) === 'true';
+        $androidNotification = [
+            'channel_id' => $silent
+                ? 'attendance_updates_silent'
+                : 'workday_events',
+        ];
+        if (!$silent) {
+            $androidNotification['sound'] = 'default';
+        }
+
         $payload = json_encode([
             'message' => [
                 'token' => $deviceToken,
@@ -189,11 +205,8 @@ final class PushNotificationService
                 ],
                 'data' => $data,
                 'android' => [
-                    'priority' => 'high',
-                    'notification' => [
-                        'channel_id' => 'workday_events',
-                        'sound' => 'default',
-                    ],
+                    'priority' => $silent ? 'normal' : 'high',
+                    'notification' => $androidNotification,
                 ],
             ],
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);

@@ -50,6 +50,20 @@ final class ApiConfig
         return max(1, min($minutes, 1440)) * 60;
     }
 
+    public static function cronSecret(): string
+    {
+        $secret = getenv('CRON_SECRET')
+            ?: self::credential('CRON_SECRET', '');
+
+        if (!is_string($secret) || strlen($secret) < self::MINIMUM_SECRET_LENGTH) {
+            throw new RuntimeException(
+                'CRON_SECRET debe contener al menos 32 caracteres.'
+            );
+        }
+
+        return $secret;
+    }
+
     public static function credential(string $key, mixed $default = null): mixed
     {
         $credentials = self::credentials();

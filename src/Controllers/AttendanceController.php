@@ -8,6 +8,7 @@ use DateTimeZone;
 use JsonException;
 use Nordictech\Api\Data\Database;
 use Nordictech\Api\Http\Response;
+use Nordictech\Api\Services\PushNotificationService;
 use PDO;
 use PDOException;
 use Throwable;
@@ -283,6 +284,14 @@ final class AttendanceController
                 'Ocurrió un error al registrar la entrada.'
             );
         }
+
+        $this->notifyAssignedSupervisor(
+            $connection,
+            $userId,
+            'CHECK_IN',
+            $now,
+            (string) $location['nombre_lugar']
+        );
 
         Response::json([
             'idEntrada' => $checkInId,
@@ -567,6 +576,14 @@ final class AttendanceController
             );
         }
 
+        $this->notifyAssignedSupervisor(
+            $connection,
+            $userId,
+            'CHECK_OUT',
+            $now,
+            (string) $location['nombre_lugar']
+        );
+
         Response::json([
             'idSalida' => $checkOutId,
             'idJornada' => $journeyId,
@@ -593,6 +610,90 @@ final class AttendanceController
         if ($statement->fetch() === false) {
             throw new InactiveUserException();
         }
+    }
+
+    private function notifyAssignedSupervisor(
+        PDO $connection,
+        int $technicianId,
+        string $attendanceType,
+        DateTimeImmutable $registeredAt,
+        string $locationName
+    ): void {
+        try {
+            $statement = $connection->prepare(
+                "SELECT
+                    assignment.id_supervisor,
+                    TRIM(CONCAT(person.nombres, ' ', person.apellidos))
+                        AS technician_name
+                 FROM Asignacion_Supervisores assignment
+                 INNER JOIN Usuarios technician
+                    ON technician.id_usuario = assignment.id_tecnico
+                 INNER JOIN Datos_Personales person
+                    ON person.id_datos_personales =
+                        technician.id_datos_personales
+                 INNER JOIN Usuarios supervisor
+                    ON supervisor.id_usuario = assignment.id_supervisor
+                 WHERE assignment.id_tecnico = :id_tecnico
+                   AND assignment.estado_activo = 1
+                   AND technician.estado_activo = 1
+                   AND supervisor.estado_activo = 1
+                 LIMIT 1"
+            );
+            $statement->execute(['id_tecnico' => $technicianId]);
+            $assignment = $statement->fetch();
+
+            if (!is_array($assignment)) {
+                return;
+            }
+
+            $supervisorId = (int) $assignment['id_supervisor'];
+            $technicianName = trim(
+                (string) $assignment['technician_name']
+            );
+            if ($supervisorId <= 0 || $technicianName === '') {
+                return;
+            }
+
+            $isCheckIn = $attendanceType === 'CHECK_IN';
+            $eventName = $isCheckIn ? 'entrada' : 'salida';
+            $title = $isCheckIn
+                ? 'Entrada registrada'
+                : 'Salida registrada';
+            $body = sprintf(
+                '%s marcó su %s a las %s en %s.',
+                $technicianName,
+                $eventName,
+                $this->notificationTime($registeredAt),
+                $locationName
+            );
+
+            PushNotificationService::sendToUser(
+                $supervisorId,
+                $title,
+                $body,
+                [
+                    'type' => 'attendance_update',
+                    'attendanceType' => strtolower($attendanceType),
+                    'technicianId' => (string) $technicianId,
+                    'route' => '/supervisor',
+                    'silent' => 'true',
+                ]
+            );
+        } catch (Throwable $exception) {
+            error_log(
+                '[API Asistencia][supervisor_attendance_push] '
+                . $exception->getMessage()
+            );
+        }
+    }
+
+    private function notificationTime(DateTimeImmutable $date): string
+    {
+        return str_replace(
+            ['am', 'pm'],
+            ['a. m.', 'p. m.'],
+            strtolower($date->format('g:i a'))
+        );
     }
 
     /** @return array<string, mixed> */
