@@ -1,6 +1,13 @@
 @ApiBaseUrl = https://tudominio.com/api-asistencia
 @Token = REEMPLAZAR_CON_ACCESS_TOKEN
 
+### Reporte personal quincenal de horas extra (solo días 10 y 25)
+GET {{ApiBaseUrl}}/api/v1/attendance/overtime-report
+Authorization: Bearer {{Token}}
+Accept: application/json
+
+###
+
 POST {{ApiBaseUrl}}/api/v1/auth/login
 Content-Type: application/json
 

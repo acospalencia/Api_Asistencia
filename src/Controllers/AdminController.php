@@ -929,11 +929,15 @@ final class AdminController
         }
 
         if (!is_string($role)
-            || !in_array(strtolower($role), ['admin', 'administrador'], true)) {
+            || !in_array(
+                strtolower(trim($role)),
+                ['admin', 'administrador', 'administración', 'administracion'],
+                true
+            )) {
             Response::error(
                 403,
                 'administrator_required',
-                'Esta función requiere el rol de administrador.'
+                'Esta función requiere un rol administrativo.'
             );
         }
 

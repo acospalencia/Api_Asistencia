@@ -165,21 +165,45 @@ final class SupervisorController
     }
 
     /** @param array<string, mixed> $claims */
-    public function report(array $claims): never
+    public function report(
+        array $claims,
+        bool $selfService = false
+    ): never
     {
-        $connection = $this->requireSupervisor($claims);
+        [$connection, $hasGlobalAccess] =
+            $this->requireReportAccess($claims, $selfService);
         $supervisorId = (int) ($claims['sub'] ?? 0);
         $timezone = new DateTimeZone('America/El_Salvador');
-        $days = $this->requestedReportDays();
-        $selectedTechnicianId = $this->requestedReportTechnicianId();
-        $endDate = new DateTimeImmutable('today', $timezone);
-        $startDate = $endDate->modify(
-            sprintf('-%d days', $days - 1)
-        );
+        if ($selfService) {
+            [$startDate, $endDate] =
+                $this->selfServicePeriod($timezone);
+            $selectedTechnicianId = $supervisorId;
+            $days = ((int) $startDate->diff($endDate)->days) + 1;
+        } else {
+            $days = $this->requestedReportDays();
+            $selectedTechnicianId = $this->requestedReportTechnicianId();
+            $endDate = new DateTimeImmutable('today', $timezone);
+            $startDate = $endDate->modify(
+                sprintf('-%d days', $days - 1)
+            );
+        }
+        $useUnrestrictedQuery = $hasGlobalAccess || $selfService;
 
         try {
-            $availableStatement = $connection->prepare(
-                "SELECT
+            $availableSql = $useUnrestrictedQuery
+                ? "SELECT
+                    t.id_usuario AS tecnico_id,
+                    t.username AS tecnico_username,
+                    TRIM(CONCAT(dp.nombres, ' ', dp.apellidos))
+                        AS tecnico_nombre
+                 FROM Usuarios t
+                 INNER JOIN Roles r ON r.id_rol = t.id_rol
+                 INNER JOIN Datos_Personales dp
+                    ON dp.id_datos_personales = t.id_datos_personales
+                 WHERE t.estado_activo = 1
+                   AND LOWER(r.nombre_rol) IN ('tecnico', 'técnico')
+                 ORDER BY dp.nombres, dp.apellidos"
+                : "SELECT
                     t.id_usuario AS tecnico_id,
                     t.username AS tecnico_username,
                     TRIM(CONCAT(dp.nombres, ' ', dp.apellidos))
@@ -193,12 +217,21 @@ final class SupervisorController
                    AND a.estado_activo = 1
                    AND t.estado_activo = 1
                    AND LOWER(r.nombre_rol) IN ('tecnico', 'técnico')
-                 ORDER BY dp.nombres, dp.apellidos"
+                 ORDER BY dp.nombres, dp.apellidos";
+            $availableStatement = $connection->prepare($availableSql);
+            $availableStatement->execute(
+                $useUnrestrictedQuery
+                    ? []
+                    : ['id_supervisor' => $supervisorId]
             );
-            $availableStatement->execute([
-                'id_supervisor' => $supervisorId,
-            ]);
             $availableRows = $availableStatement->fetchAll();
+            if ($selfService) {
+                $availableRows = array_values(array_filter(
+                    $availableRows,
+                    static fn (array $row): bool =>
+                        (int) $row['tecnico_id'] === $supervisorId
+                ));
+            }
 
             $availableTechnicians = array_map(
                 static fn (array $row): array => [
@@ -223,13 +256,44 @@ final class SupervisorController
                     Response::error(
                         422,
                         'invalid_report_technician',
-                        'El técnico seleccionado no está asignado a este supervisor.'
+                        ($hasGlobalAccess || $selfService)
+                            ? 'El técnico seleccionado no está activo o no existe.'
+                            : 'El técnico seleccionado no está asignado a este supervisor.'
                     );
                 }
             }
 
-            $statement = $connection->prepare(
-                "SELECT
+            $reportSql = $useUnrestrictedQuery
+                ? "SELECT
+                    t.id_usuario AS tecnico_id,
+                    t.username AS tecnico_username,
+                    t.email AS tecnico_email,
+                    dp.nombres,
+                    dp.apellidos,
+                    j.fecha_jornada,
+                    e.fecha_hora_entrada,
+                    e.comentario_atraso,
+                    ue.nombre_lugar AS ubicacion_entrada,
+                    s.fecha_hora_salida,
+                    s.comentario_retiro_anticipado,
+                    us.nombre_lugar AS ubicacion_salida
+                 FROM Usuarios t
+                 INNER JOIN Roles r ON r.id_rol = t.id_rol
+                 INNER JOIN Datos_Personales dp
+                    ON dp.id_datos_personales = t.id_datos_personales
+                 LEFT JOIN Jornadas j
+                    ON j.id_usuario = t.id_usuario
+                   AND j.fecha_jornada BETWEEN :start_date AND :end_date
+                 LEFT JOIN Asistencia_Entrada e ON e.id_jornada = j.id_jornada
+                 LEFT JOIN Ubicaciones ue ON ue.id_ubicacion = e.id_ubicacion
+                 LEFT JOIN Asistencia_Salida s ON s.id_jornada = j.id_jornada
+                 LEFT JOIN Ubicaciones us ON us.id_ubicacion = s.id_ubicacion
+                 WHERE t.estado_activo = 1
+                   AND LOWER(r.nombre_rol) IN ('tecnico', 'técnico')
+                   AND (:selected_technician = 0
+                        OR t.id_usuario = :selected_technician_filter)
+                 ORDER BY dp.nombres, dp.apellidos, j.fecha_jornada DESC"
+                : "SELECT
                     t.id_usuario AS tecnico_id,
                     t.username AS tecnico_username,
                     t.email AS tecnico_email,
@@ -269,19 +333,45 @@ final class SupervisorController
                  ORDER BY
                     dp.nombres,
                     dp.apellidos,
-                    j.fecha_jornada DESC"
-            );
-            $statement->execute([
+                    j.fecha_jornada DESC";
+            $statement = $connection->prepare($reportSql);
+            $reportParameters = [
                 'start_date' => $startDate->format('Y-m-d'),
                 'end_date' => $endDate->format('Y-m-d'),
-                'id_supervisor' => $supervisorId,
                 'selected_technician' => $selectedTechnicianId,
                 'selected_technician_filter' => $selectedTechnicianId,
-            ]);
+            ];
+            if (!$useUnrestrictedQuery) {
+                $reportParameters['id_supervisor'] = $supervisorId;
+            }
+            $statement->execute($reportParameters);
             $rows = $statement->fetchAll();
 
-            $missionStatement = $connection->prepare(
-                "SELECT
+            $missionSql = $useUnrestrictedQuery
+                ? "SELECT
+                    t.id_usuario AS tecnico_id,
+                    j.fecha_jornada,
+                    ev.id_evento,
+                    ev.tipo_evento,
+                    ev.descripcion_mision,
+                    ev.comentario_tecnico,
+                    ev.mensaje_supervisor,
+                    ev.estado_evento,
+                    ev.hora_asignacion,
+                    ev.hora_inicio_trayecto,
+                    ev.hora_fin_trayecto
+                 FROM Eventos_Jornada ev
+                 INNER JOIN Jornadas j ON j.id_jornada = ev.id_jornada
+                 INNER JOIN Usuarios t ON t.id_usuario = j.id_usuario
+                 INNER JOIN Roles r ON r.id_rol = t.id_rol
+                 WHERE t.estado_activo = 1
+                   AND LOWER(r.nombre_rol) IN ('tecnico', 'técnico')
+                   AND j.fecha_jornada
+                        BETWEEN :mission_start_date AND :mission_end_date
+                   AND (:mission_technician = 0
+                        OR t.id_usuario = :mission_technician_filter)
+                 ORDER BY t.id_usuario, j.fecha_jornada DESC, ev.hora_asignacion"
+                : "SELECT
                     t.id_usuario AS tecnico_id,
                     j.fecha_jornada,
                     ev.id_evento,
@@ -312,16 +402,19 @@ final class SupervisorController
                  ORDER BY
                     t.id_usuario,
                     j.fecha_jornada DESC,
-                    ev.hora_asignacion"
-            );
-            $missionStatement->execute([
-                'mission_supervisor' => $supervisorId,
-                'event_supervisor' => $supervisorId,
+                    ev.hora_asignacion";
+            $missionStatement = $connection->prepare($missionSql);
+            $missionParameters = [
                 'mission_start_date' => $startDate->format('Y-m-d'),
                 'mission_end_date' => $endDate->format('Y-m-d'),
                 'mission_technician' => $selectedTechnicianId,
                 'mission_technician_filter' => $selectedTechnicianId,
-            ]);
+            ];
+            if (!$useUnrestrictedQuery) {
+                $missionParameters['mission_supervisor'] = $supervisorId;
+                $missionParameters['event_supervisor'] = $supervisorId;
+            }
+            $missionStatement->execute($missionParameters);
             $missionRows = $missionStatement->fetchAll();
         } catch (Throwable $exception) {
             error_log(
@@ -571,6 +664,116 @@ final class SupervisorController
         }
 
         return $connection;
+    }
+
+    /**
+     * @param array<string, mixed> $claims
+     * @return array{0: PDO, 1: bool}
+     */
+    private function requireReportAccess(
+        array $claims,
+        bool $selfService = false
+    ): array
+    {
+        $userId = (int) ($claims['sub'] ?? 0);
+        if ($userId <= 0) {
+            Response::error(401, 'invalid_token', 'La sesión no identifica al usuario.');
+        }
+
+        try {
+            $connection = Database::connection();
+            $statement = $connection->prepare(
+                'SELECT r.nombre_rol
+                 FROM Usuarios u
+                 INNER JOIN Roles r ON r.id_rol = u.id_rol
+                 WHERE u.id_usuario = :id_usuario
+                   AND u.estado_activo = 1
+                 LIMIT 1'
+            );
+            $statement->execute(['id_usuario' => $userId]);
+            $role = $statement->fetchColumn();
+        } catch (Throwable $exception) {
+            error_log('[API Asistencia][report_authorization] ' . $exception->getMessage());
+            Response::error(503, 'authorization_unavailable', 'No fue posible validar los permisos del reporte.');
+        }
+
+        $normalizedRole = is_string($role)
+            ? strtolower(trim($role))
+            : '';
+        $hasGlobalAccess = in_array(
+            $normalizedRole,
+            ['administración', 'administracion'],
+            true
+        );
+        $isTechnician = in_array(
+            $normalizedRole,
+            ['tecnico', 'técnico'],
+            true
+        );
+
+        if ($selfService && !$isTechnician) {
+            Response::error(
+                403,
+                'technician_required',
+                'El reporte personal de horas extra es exclusivo para técnicos.'
+            );
+        }
+
+        if ($normalizedRole !== 'supervisor'
+            && !$hasGlobalAccess
+            && !($selfService && $isTechnician)) {
+            Response::error(
+                403,
+                'report_access_required',
+                'Esta función requiere rol Supervisor o Administración.'
+            );
+        }
+
+        return [$connection, $hasGlobalAccess];
+    }
+
+    /** @return array{0: DateTimeImmutable, 1: DateTimeImmutable} */
+    private function selfServicePeriod(DateTimeZone $timezone): array
+    {
+        $today = new DateTimeImmutable('today', $timezone);
+        $day = (int) $today->format('j');
+
+        if ($day === 10) {
+            $previousMonth = $today->modify('first day of previous month');
+            return [
+                $previousMonth->setDate(
+                    (int) $previousMonth->format('Y'),
+                    (int) $previousMonth->format('n'),
+                    25
+                ),
+                $today->setDate(
+                    (int) $today->format('Y'),
+                    (int) $today->format('n'),
+                    9
+                ),
+            ];
+        }
+
+        if ($day === 25) {
+            return [
+                $today->setDate(
+                    (int) $today->format('Y'),
+                    (int) $today->format('n'),
+                    10
+                ),
+                $today->setDate(
+                    (int) $today->format('Y'),
+                    (int) $today->format('n'),
+                    23
+                ),
+            ];
+        }
+
+        Response::error(
+            403,
+            'overtime_report_not_available',
+            'El reporte personal de horas extra solo está disponible los días 10 y 25 de cada mes.'
+        );
     }
 
     private function requestedReportDays(): int

@@ -138,6 +138,7 @@ final class AttendanceController
         try {
             $connection = Database::connection();
             $this->ensureActiveUser($connection, $userId);
+            $this->ensureTechnician($connection, $userId);
             $this->ensureWorkingDay($connection, $userId, $now);
 
             $locationStatement = $connection->prepare(
@@ -379,6 +380,7 @@ final class AttendanceController
         try {
             $connection = Database::connection();
             $this->ensureActiveUser($connection, $userId);
+            $this->ensureTechnician($connection, $userId);
             $this->ensureWorkingDay($connection, $userId, $now);
 
             $locationStatement = $connection->prepare(
@@ -660,6 +662,34 @@ final class AttendanceController
                 403,
                 'attendance_blocked_day',
                 'Hoy no se permite marcar asistencia. Motivo: ' . $reason
+            );
+        }
+    }
+
+    private function ensureTechnician(
+        PDO $connection,
+        int $userId
+    ): void {
+        $statement = $connection->prepare(
+            'SELECT r.nombre_rol
+             FROM Usuarios u
+             INNER JOIN Roles r ON r.id_rol = u.id_rol
+             WHERE u.id_usuario = :id_usuario
+             LIMIT 1'
+        );
+        $statement->execute(['id_usuario' => $userId]);
+        $role = $statement->fetchColumn();
+
+        if (!is_string($role)
+            || !in_array(
+                strtolower(trim($role)),
+                ['tecnico', 'técnico'],
+                true
+            )) {
+            Response::error(
+                403,
+                'technician_required',
+                'Solo los técnicos pueden registrar asistencia.'
             );
         }
     }

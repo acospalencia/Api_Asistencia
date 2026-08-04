@@ -286,13 +286,18 @@ final class NonWorkingDayController
         if (!is_string($role)
             || !in_array(
                 strtolower(trim($role)),
-                ['admin', 'administrador'],
+                [
+                    'admin',
+                    'administrador',
+                    'administración',
+                    'administracion',
+                ],
                 true
             )) {
             Response::error(
                 403,
                 'administrator_required',
-                'Esta operación requiere rol Administrador.'
+                'Esta operación requiere un rol administrativo.'
             );
         }
 

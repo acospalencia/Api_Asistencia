@@ -1,6 +1,7 @@
 INSERT INTO Roles (nombre_rol, descripcion)
 VALUES
     ('Administrador', 'Acceso total al panel y configuración del sistema'),
+    ('Administración', 'Administración del sistema y reportes globales de técnicos'),
     ('Supervisor', 'Supervisa y administra técnicos asignados'),
     ('Técnico', 'Registra asistencia y realiza labores operativas')
 ON DUPLICATE KEY UPDATE

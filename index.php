@@ -45,7 +45,7 @@ try {
     if ($method === 'GET' && $path === '/api/v1/health') {
         Response::json([
             'status' => 'ok',
-            'apiVersion' => '2026.07.29.9',
+            'apiVersion' => '2026.08.04.2',
             'pdoMysql' => extension_loaded('pdo_mysql'),
         ]);
     }
@@ -91,6 +91,12 @@ try {
         && $path === '/api/v1/attendance/availability/today') {
         $claims = AuthMiddleware::authenticate();
         (new NonWorkingDayController())->today($claims);
+    }
+
+    if ($method === 'GET'
+        && $path === '/api/v1/attendance/overtime-report') {
+        $claims = AuthMiddleware::authenticate();
+        (new SupervisorController())->report($claims, true);
     }
 
     if ($method === 'GET'

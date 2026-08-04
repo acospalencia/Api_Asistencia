@@ -3,7 +3,7 @@
 Versión PHP 8.2+ diseñada para Bluehost Shared Hosting. No necesita Composer,
 terminal ni un proceso permanente.
 
-Versión actual de la API: `2026.07.29.9`.
+Versión actual de la API: `2026.08.04.2`.
 
 Producción:
 
@@ -16,6 +16,8 @@ https://api.nordictech-corp.com/api/v1/health
 
 - Autenticación JWT y contraseñas protegidas con `password_hash`.
 - Gestión administrativa de usuarios, roles, asignaciones y ubicaciones.
+- Rol `Administración` con panel administrativo y reportes globales de todos
+  los técnicos, sin marcación de entrada o salida.
 - Entradas y salidas con validación geográfica y reglas de horario.
 - Días sin marcación administrables y validados también en el servidor.
 - Misiones de jornada para supervisores y técnicos.
@@ -68,6 +70,10 @@ ejecutará.
   evita salidas duplicadas y solicita justificación antes de las 5:00 p. m.
 - `GET /api/v1/attendance/availability/today`: indica si el técnico
   autenticado puede marcar asistencia durante la fecha actual.
+- `GET /api/v1/attendance/overtime-report`: genera exclusivamente para el
+  técnico autenticado su reporte quincenal de horas extra. Solo está
+  disponible los días 10 y 25. El día 10 incluye del 25 del mes anterior al
+  9 actual; el día 25 incluye del 10 al 23 actual.
 - `GET /api/v1/admin/dashboard`: devuelve métricas, usuarios, roles,
   supervisores, técnicos y sus asignaciones. Requiere rol Administrador.
 - `PUT /api/v1/admin/users/{id}/role`: cambia el rol de un usuario.
@@ -262,7 +268,7 @@ Al desplegar:
 2. Sube `src.zip` a la raíz de la API.
 3. Extrae y sobrescribe los archivos del código.
 4. Comprueba `/api/v1/health`.
-5. Confirma que `apiVersion` sea `2026.07.29.9`.
+5. Confirma que `apiVersion` sea `2026.08.04.2`.
 
 ## Seguridad
 
