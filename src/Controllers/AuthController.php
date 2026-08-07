@@ -7,10 +7,31 @@ use JsonException;
 use Nordictech\Api\Data\Database;
 use Nordictech\Api\Http\Response;
 use Nordictech\Api\Security\Jwt;
+use Nordictech\Api\Config\ApiConfig;
+use Nordictech\Api\Services\PasswordResetMailService;
 use Throwable;
 
 final class AuthController
 {
+    /** @return array<string, mixed> */
+    private function requestBody(): array
+    {
+        $contentType = strtolower(trim(explode(';', $_SERVER['CONTENT_TYPE'] ?? '')[0]));
+        if ($contentType === 'application/x-www-form-urlencoded') {
+            return $_POST;
+        }
+
+        try {
+            $body = json_decode(file_get_contents('php://input') ?: '', true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            Response::error(400, 'invalid_json', 'El cuerpo JSON es inválido.');
+        }
+        if (!is_array($body)) {
+            Response::error(400, 'invalid_json', 'El cuerpo JSON es inválido.');
+        }
+        return $body;
+    }
+
     public function login(): never
     {
         $contentType = strtolower(
@@ -152,5 +173,130 @@ final class AuthController
                 'role' => (string) $user['nombre_rol'],
             ],
         ]);
+    }
+
+    public function forgotPassword(): never
+    {
+        $identifier = strtolower(trim((string) ($this->requestBody()['identifier'] ?? '')));
+        if ($identifier === '' || strlen($identifier) > 100) {
+            Response::error(422, 'validation_error', 'Ingresa tu usuario o correo electrónico.');
+        }
+
+        $requestFailed = false;
+        try {
+            $pdo = Database::connection();
+            $statement = $pdo->prepare(
+                'SELECT id_usuario, email FROM Usuarios
+                 WHERE (LOWER(username) = :username
+                    OR LOWER(email) = :email)
+                   AND estado_activo = b\'1\' LIMIT 1'
+            );
+            $statement->execute([
+                'username' => $identifier,
+                'email' => $identifier,
+            ]);
+            $user = $statement->fetch();
+            if (is_array($user) && filter_var($user['email'], FILTER_VALIDATE_EMAIL)) {
+                $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+                $hash = hash_hmac('sha256', $code, ApiConfig::jwtSecret());
+                $pdo->beginTransaction();
+                $invalidate = $pdo->prepare(
+                    'UPDATE Password_Reset_Tokens SET used_at = UTC_TIMESTAMP()
+                     WHERE id_usuario = :id_usuario AND used_at IS NULL'
+                );
+                $invalidate->execute(['id_usuario' => (int) $user['id_usuario']]);
+                $insert = $pdo->prepare(
+                    'INSERT INTO Password_Reset_Tokens
+                        (id_usuario, token_hash, expires_at)
+                     VALUES (:id_usuario, :token_hash, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))'
+                );
+                $insert->execute([
+                    'id_usuario' => (int) $user['id_usuario'],
+                    'token_hash' => $hash,
+                ]);
+                if (!PasswordResetMailService::send(
+                    (string) $user['email'],
+                    $code
+                )) {
+                    throw new \RuntimeException(
+                        'La función mail() no aceptó el mensaje.'
+                    );
+                }
+                $pdo->commit();
+            }
+        } catch (Throwable $exception) {
+            if (isset($pdo) && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[API Asistencia][forgot_password] ' . $exception->getMessage());
+            $requestFailed = true;
+        }
+
+        if ($requestFailed) {
+            Response::error(
+                503,
+                'password_reset_unavailable',
+                'No fue posible enviar el código. Intenta nuevamente más tarde.'
+            );
+        }
+
+        Response::json(['message' => 'Si la cuenta existe, enviaremos un código al correo registrado.']);
+    }
+
+    public function resetPassword(): never
+    {
+        $body = $this->requestBody();
+        $identifier = strtolower(trim((string) ($body['identifier'] ?? '')));
+        $code = trim((string) ($body['code'] ?? ''));
+        $password = (string) ($body['password'] ?? '');
+        if ($identifier === '' || preg_match('/^\d{6}$/', $code) !== 1) {
+            Response::error(422, 'invalid_reset_code', 'El código no es válido.');
+        }
+        if (strlen($password) < 8 || strlen($password) > 200
+            || preg_match('/[a-z]/', $password) !== 1
+            || preg_match('/[A-Z]/', $password) !== 1
+            || preg_match('/\d/', $password) !== 1) {
+            Response::error(422, 'weak_password', 'La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número.');
+        }
+
+        try {
+            $pdo = Database::connection();
+            $pdo->beginTransaction();
+            $statement = $pdo->prepare(
+                'SELECT pr.id_reset, pr.token_hash, pr.attempts, u.id_usuario
+                 FROM Password_Reset_Tokens pr INNER JOIN Usuarios u ON u.id_usuario = pr.id_usuario
+                 WHERE (LOWER(u.username) = :username
+                    OR LOWER(u.email) = :email)
+                   AND pr.used_at IS NULL AND pr.expires_at > UTC_TIMESTAMP()
+                 ORDER BY pr.id_reset DESC LIMIT 1 FOR UPDATE'
+            );
+            $statement->execute([
+                'username' => $identifier,
+                'email' => $identifier,
+            ]);
+            $reset = $statement->fetch();
+            $valid = is_array($reset) && (int) $reset['attempts'] < 5
+                && hash_equals((string) $reset['token_hash'], hash_hmac('sha256', $code, ApiConfig::jwtSecret()));
+            if (!$valid) {
+                if (is_array($reset)) {
+                    $pdo->prepare('UPDATE Password_Reset_Tokens SET attempts = attempts + 1 WHERE id_reset = :id_reset')
+                        ->execute(['id_reset' => (int) $reset['id_reset']]);
+                }
+                $pdo->commit();
+                Response::error(422, 'invalid_reset_code', 'El código es incorrecto o ya venció.');
+            }
+            $pdo->prepare('UPDATE Usuarios SET password_hash = :password_hash WHERE id_usuario = :id_usuario')
+                ->execute(['password_hash' => password_hash($password, PASSWORD_DEFAULT), 'id_usuario' => (int) $reset['id_usuario']]);
+            $pdo->prepare('UPDATE Password_Reset_Tokens SET used_at = UTC_TIMESTAMP() WHERE id_usuario = :id_usuario AND used_at IS NULL')
+                ->execute(['id_usuario' => (int) $reset['id_usuario']]);
+            $pdo->commit();
+        } catch (Throwable $exception) {
+            if (isset($pdo) && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[API Asistencia][reset_password] ' . $exception->getMessage());
+            Response::error(503, 'password_reset_unavailable', 'No fue posible restablecer la contraseña.');
+        }
+        Response::json(['message' => 'La contraseña se actualizó correctamente.']);
     }
 }

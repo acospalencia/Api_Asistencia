@@ -15,6 +15,7 @@ use Nordictech\Api\Controllers\NonWorkingDayController;
 use Nordictech\Api\Http\AuthMiddleware;
 use Nordictech\Api\Http\RateLimiter;
 use Nordictech\Api\Http\Response;
+use Nordictech\Api\Config\ApiConfig;
 
 try {
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
@@ -25,6 +26,12 @@ try {
     if ($method !== 'OPTIONS') {
         if ($method === 'POST' && $path === '/api/v1/auth/login') {
             RateLimiter::enforce('auth_login', 20, 300);
+        } elseif ($method === 'POST'
+            && $path === '/api/v1/auth/forgot-password') {
+            RateLimiter::enforce('auth_forgot_password_v2', 5, 300);
+        } elseif ($method === 'POST'
+            && $path === '/api/v1/auth/reset-password') {
+            RateLimiter::enforce('auth_reset_password', 10, 900);
         } elseif ($method === 'POST'
             && $path === '/api/v1/auth/register') {
             RateLimiter::enforce('auth_register', 10, 3600);
@@ -46,6 +53,8 @@ try {
         Response::json([
             'status' => 'ok',
             'apiVersion' => '2026.08.04.2',
+            'appVersion' => '1.1',
+            'appDownloadUrl' => ApiConfig::appDownloadUrl(),
             'pdoMysql' => extension_loaded('pdo_mysql'),
         ]);
     }
@@ -56,6 +65,14 @@ try {
 
     if ($method === 'POST' && $path === '/api/v1/auth/login') {
         (new AuthController())->login();
+    }
+
+    if ($method === 'POST' && $path === '/api/v1/auth/forgot-password') {
+        (new AuthController())->forgotPassword();
+    }
+
+    if ($method === 'POST' && $path === '/api/v1/auth/reset-password') {
+        (new AuthController())->resetPassword();
     }
 
     if ($method === 'POST' && $path === '/api/v1/auth/register') {

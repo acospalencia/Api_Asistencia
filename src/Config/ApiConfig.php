@@ -64,6 +64,30 @@ final class ApiConfig
         return $secret;
     }
 
+    public static function mailFromAddress(): string
+    {
+        return getenv('MAIL_FROM_ADDRESS')
+            ?: (string) self::credential(
+                'MAIL_FROM_ADDRESS',
+                'no-reply@nordictech-corp.com'
+            );
+    }
+
+    public static function mailFromName(): string
+    {
+        return getenv('MAIL_FROM_NAME')
+            ?: (string) self::credential('MAIL_FROM_NAME', 'NordicTech');
+    }
+
+    public static function appDownloadUrl(): string
+    {
+        return getenv('APP_DOWNLOAD_URL')
+            ?: (string) self::credential(
+                'APP_DOWNLOAD_URL',
+                'https://nordictech-corp.com/downloads/AsistenciaNordictech-latest.apk'
+            );
+    }
+
     public static function credential(string $key, mixed $default = null): mixed
     {
         $credentials = self::credentials();

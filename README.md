@@ -57,6 +57,8 @@ ejecutará.
 ## Endpoints
 
 - `POST /api/v1/auth/login`: recibe `username` y `password`.
+- `POST /api/v1/auth/forgot-password`: recibe `identifier` (usuario o correo) y envía un código de un solo uso.
+- `POST /api/v1/auth/reset-password`: recibe `identifier`, `code` y la nueva `password`.
 - `POST /api/v1/auth/register`: crea los datos personales y el usuario,
   asigna un rol operativo y devuelve una sesión JWT.
 - `GET /api/v1/account/me`: requiere `Authorization: Bearer TOKEN`.
@@ -139,6 +141,8 @@ necesitar Redis.
 - Lecturas: 180 por minuto.
 - Escrituras: 60 por minuto.
 - Inicio de sesión: 20 intentos cada 5 minutos.
+- Solicitud de recuperación: 5 intentos cada 5 minutos.
+- Confirmación de recuperación: 10 intentos cada 15 minutos.
 - Registro: 10 solicitudes por hora.
 - Ejecución HTTP del cron: 30 solicitudes por minuto.
 
@@ -268,7 +272,12 @@ Al desplegar:
 2. Sube `src.zip` a la raíz de la API.
 3. Extrae y sobrescribe los archivos del código.
 4. Comprueba `/api/v1/health`.
-5. Confirma que `apiVersion` sea `2026.08.04.2`.
+5. Ejecuta una vez `database/password_reset_setup.sql` en la base de datos.
+6. Configura `MAIL_FROM_ADDRESS` y `MAIL_FROM_NAME` en el `BD_credentials.php` de la API y confirma que el hosting permite `mail()`. La API envía el código inmediatamente y no utiliza tablas ni cron de la plataforma web.
+7. Confirma que `apiVersion` sea `2026.08.04.2` y `appVersion` sea `1.1`.
+8. Publica el APK más reciente en la ruta configurada por `APP_DOWNLOAD_URL`. Se recomienda conservar el nombre estable `AsistenciaNordictech-latest.apk` para no modificar la API en cada versión.
+
+Los códigos de recuperación caducan en 15 minutos, admiten como máximo cinco intentos y se almacenan únicamente como hash. Los usuarios y correos se consultan exclusivamente en `Usuarios`, dentro de la base de datos de la app. Si `mail()` rechaza el mensaje, la transacción se revierte y la API devuelve un error de servicio; para cuentas inexistentes la respuesta permanece genérica.
 
 ## Seguridad
 
