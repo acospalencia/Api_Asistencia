@@ -5,12 +5,21 @@ terminal ni un proceso permanente.
 
 Versión actual de la API: `2026.08.04.2`.
 
+Versiones coordinadas actualmente:
+
+- `APP_VERSION`: `1.2`.
+- Aplicación MAUI: `ApplicationDisplayVersion` `1.2` y
+  `ApplicationVersion` `4`.
+- La URL de descarga para Android incorpora automáticamente `?v=1.2` para
+  invalidar la caché del APK.
+
 Producción:
+
 
 ```text
 https://api.nordictech-corp.com/
 https://api.nordictech-corp.com/api/v1/health
-```
+``` 
 
 ## Funcionalidades principales
 
@@ -36,6 +45,22 @@ https://api.nordictech-corp.com/api/v1/health
 5. Completa las credenciales y cambia `JWT_SECRET` por una llave aleatoria de
    al menos 32 caracteres.
 6. No publiques ni compartas `BD_credentials.php`.
+
+Además de las credenciales de base de datos y JWT, configura:
+
+```php
+define('MAIL_FROM_ADDRESS', 'no-reply@nordictech-corp.com');
+define('MAIL_FROM_NAME', 'NordicTech');
+define('APP_VERSION', '1.2');
+define(
+    'APP_DOWNLOAD_URL',
+    'https://nordictech-corp.com/downloads/AsistenciaNordictech-latest.apk'
+);
+```
+
+No agregues manualmente `?v=` a `APP_DOWNLOAD_URL`: la API genera el
+parámetro a partir de `APP_VERSION` para que siempre coincida con la versión
+publicada.
 
 También puedes colocar `BD_credentials.php` en `public_html`, un nivel arriba
 de la API. La API busca ambas ubicaciones. La opción más segura es colocarlo
@@ -274,8 +299,8 @@ Al desplegar:
 4. Comprueba `/api/v1/health`.
 5. Ejecuta una vez `database/password_reset_setup.sql` en la base de datos.
 6. Configura `MAIL_FROM_ADDRESS` y `MAIL_FROM_NAME` en el `BD_credentials.php` de la API y confirma que el hosting permite `mail()`. La API envía el código inmediatamente y no utiliza tablas ni cron de la plataforma web.
-7. Confirma que `apiVersion` sea `2026.08.04.2` y `appVersion` sea `1.1`.
-8. Publica el APK más reciente en la ruta configurada por `APP_DOWNLOAD_URL`. Se recomienda conservar el nombre estable `AsistenciaNordictech-latest.apk` para no modificar la API en cada versión.
+7. Confirma que `apiVersion` sea `2026.08.04.2` y `appVersion` sea `1.2`.
+8. Publica el APK más reciente en la ruta configurada por `APP_DOWNLOAD_URL`. Conserva el nombre estable `AsistenciaNordictech-latest.apk` y actualiza `APP_VERSION`; la API agrega automáticamente `?v=VERSION` para evitar que el CDN entregue un APK anterior.
 
 Los códigos de recuperación caducan en 15 minutos, admiten como máximo cinco intentos y se almacenan únicamente como hash. Los usuarios y correos se consultan exclusivamente en `Usuarios`, dentro de la base de datos de la app. Si `mail()` rechaza el mensaje, la transacción se revierte y la API devuelve un error de servicio; para cuentas inexistentes la respuesta permanece genérica.
 

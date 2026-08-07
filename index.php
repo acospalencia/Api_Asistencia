@@ -53,7 +53,7 @@ try {
         Response::json([
             'status' => 'ok',
             'apiVersion' => '2026.08.04.2',
-            'appVersion' => '1.1',
+            'appVersion' => ApiConfig::appVersion(),
             'appDownloadUrl' => ApiConfig::appDownloadUrl(),
             'pdoMysql' => extension_loaded('pdo_mysql'),
         ]);

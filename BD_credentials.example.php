@@ -8,6 +8,7 @@ define('DB_PASSWORD', 'password_mysql');
 define('DB_CHARSET', 'utf8');
 define('DB_COLLATE', '');
 
+// test
 // Si el archivo ya contiene AUTH_KEY de WordPress, la API puede usarla.
 define('AUTH_KEY', 'CAMBIA_ESTA_LLAVE_POR_UNA_ALEATORIA_DE_64_CARACTERES');
 
@@ -20,6 +21,9 @@ define('JWT_EXPIRATION_MINUTES', 60);
 // Remitente usado exclusivamente por la recuperación de la app.
 define('MAIL_FROM_ADDRESS', 'no-reply@nordictech-corp.com');
 define('MAIL_FROM_NAME', 'NordicTech');
+
+// Versión requerida por la API; también evita la caché del APK.
+define('APP_VERSION', '1.2');
 
 // APK estable que siempre debe apuntar a la última versión publicada.
 define(

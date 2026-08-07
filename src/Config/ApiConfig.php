@@ -79,13 +79,40 @@ final class ApiConfig
             ?: (string) self::credential('MAIL_FROM_NAME', 'NordicTech');
     }
 
+    public static function appVersion(): string
+    {
+        return getenv('APP_VERSION')
+            ?: (string) self::credential('APP_VERSION', '1.2');
+    }
+
     public static function appDownloadUrl(): string
     {
-        return getenv('APP_DOWNLOAD_URL')
+        $url = getenv('APP_DOWNLOAD_URL')
             ?: (string) self::credential(
                 'APP_DOWNLOAD_URL',
                 'https://nordictech-corp.com/downloads/AsistenciaNordictech-latest.apk'
             );
+
+        $versionParameter = 'v=' . rawurlencode(self::appVersion());
+
+        if (preg_match('~([?&])v=[^&#]*~', $url) === 1) {
+            return (string) preg_replace(
+                '~([?&])v=[^&#]*~',
+                '${1}' . $versionParameter,
+                $url,
+                1
+            );
+        }
+
+        $fragment = '';
+        $fragmentPosition = strpos($url, '#');
+        if ($fragmentPosition !== false) {
+            $fragment = substr($url, $fragmentPosition);
+            $url = substr($url, 0, $fragmentPosition);
+        }
+
+        $separator = str_contains($url, '?') ? '&' : '?';
+        return $url . $separator . $versionParameter . $fragment;
     }
 
     public static function credential(string $key, mixed $default = null): mixed
